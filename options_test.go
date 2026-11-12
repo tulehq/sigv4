@@ -245,7 +245,7 @@ func TestMaxPresignExpiry(t *testing.T) {
 	}
 	r := s3PresignedRequest(t, s3Target, time.Hour+time.Second)
 	e := asKind(t, v.check(r), KindInvalidExpires)
-	if want := "X-Amz-Expires must be a number of seconds between 0 and 3600"; e.Message != want {
+	if want := "X-Amz-Expires must be a number of seconds between 1 and 3600"; e.Message != want {
 		t.Fatalf("message = %q, want %q", e.Message, want)
 	}
 }

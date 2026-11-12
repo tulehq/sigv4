@@ -166,7 +166,7 @@ codes.
 | `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted, unique and at most 128 names | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindInvalidDate` | `X-Amz-Date` missing or malformed | header: 403 `AccessDenied`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindRequestTimeTooSkewed` | `X-Amz-Date` beyond the skew | 403 `RequestTimeTooSkewed` "The difference between the request time and the current time is too large." | 403 `InvalidSignatureException` |
-| `KindInvalidExpires` | `X-Amz-Expires` not 0 to the maximum | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
+| `KindInvalidExpires` | `X-Amz-Expires` not 1 to the maximum, "X-Amz-Expires must be a number of seconds between 1 and 604800" | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
 | `KindExpired` | Presigned URL past its expiry | 403 `AccessDenied` "Request has expired" | (presigned URLs off) |
 | `KindRequestNotYetValid` | Presigned URL dated beyond the skew | 403 `AccessDenied` "Request is not yet valid" (1) | (presigned URLs off) |
 | `KindMissingPayloadHash` | Streamed payload, header request without `X-Amz-Content-Sha256` | 400 `InvalidRequest` | (buffered payload) |

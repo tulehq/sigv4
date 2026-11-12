@@ -228,7 +228,7 @@ func s3PresignRows() []tableRow {
 			request: withQuery(s3Presigned, "X-Amz-Expires", "604801"),
 			want: wire{
 				status: bad, code: aqpe,
-				message: "X-Amz-Expires must be a number of seconds between 0 and 604800",
+				message: "X-Amz-Expires must be a number of seconds between 1 and 604800",
 			},
 		},
 		{
@@ -236,7 +236,7 @@ func s3PresignRows() []tableRow {
 			request: withQuery(s3Presigned, "X-Amz-Expires", "-1"),
 			want: wire{
 				status: bad, code: aqpe,
-				message: "X-Amz-Expires must be a number of seconds between 0 and 604800",
+				message: "X-Amz-Expires must be a number of seconds between 1 and 604800",
 			},
 		},
 		{

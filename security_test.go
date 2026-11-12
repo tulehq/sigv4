@@ -430,3 +430,16 @@ func TestQuerySortsByKeyThenValue(t *testing.T) {
 		})
 	}
 }
+
+func TestPresignExpiresZeroIsRefused(t *testing.T) {
+	// AWS takes X-Amz-Expires from 1 to 604800 seconds.
+	r := withQuery(s3Presigned, "X-Amz-Expires", "0")(t)
+	e := asKind(t, s3Verifier(t, WithClock(fixedClock(s3SignTime))).check(r), KindInvalidExpires)
+	if want := "X-Amz-Expires must be a number of seconds between 1 and 604800"; e.Message != want {
+		t.Fatalf("message = %q, want %q", e.Message, want)
+	}
+	r = withQuery(s3Presigned, "X-Amz-Expires", "1")(t)
+	if err := s3Verifier(t, WithClock(fixedClock(s3SignTime))).check(r); err != nil {
+		wantKind(t, err, KindSignatureMismatch) // the URL was signed for an hour
+	}
+}

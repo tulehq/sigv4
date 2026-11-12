@@ -217,9 +217,10 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 	}
 	maxExpires := int(v.maxExpiry / time.Second)
 	expires, err := strconv.Atoi(q.Get("X-Amz-Expires"))
-	if err != nil || expires < 0 || expires > maxExpires {
+	// AWS takes 1 to 604800 seconds; a URL valid for none is no URL.
+	if err != nil || expires < 1 || expires > maxExpires {
 		return nil, newError(KindInvalidExpires, true, "X-Amz-Expires must be a number of "+
-			"seconds between 0 and "+strconv.Itoa(maxExpires))
+			"seconds between 1 and "+strconv.Itoa(maxExpires))
 	}
 	if e := v.checkPresignWindow(date, time.Duration(expires)*time.Second); e != nil {
 		return nil, e
