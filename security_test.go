@@ -5,6 +5,9 @@ package sigv4
 
 import (
 	"context"
+	"encoding/xml"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -99,5 +102,132 @@ func TestSignedAmzHeadersVerify(t *testing.T) {
 	}
 	if err = s3Verifier(t).check(pr); err != nil {
 		t.Fatalf("presigned: %v", err)
+	}
+}
+
+// deleteBodies returns a DeleteObjects body and a forged one of the same
+// length naming another key, padded with the spaces XML ignores.
+func deleteBodies() (orig, forged string) {
+	var sb strings.Builder
+	sb.WriteString("<Delete>")
+	for sb.Len() < 6000 {
+		sb.WriteString("<Object><Key>logs/tmp-00000000</Key></Object>")
+	}
+	sb.WriteString("</Delete>")
+	orig = sb.String()
+	forged = "<Delete><Object><Key>prod/important.db</Key></Object></Delete>"
+	return orig, forged + strings.Repeat(" ", len(orig)-len(forged))
+}
+
+type deleteRequest struct {
+	XMLName xml.Name `xml:"Delete"`
+	Keys    []string `xml:"Object>Key"`
+}
+
+func TestStreamedEarlyStopFailsOnClose(t *testing.T) {
+	// A decoder stops at the end of its value, short of Content-Length, so
+	// its reads never reach the check; Close reads the rest and makes it.
+	orig, forged := deleteBodies()
+	r := s3Put(t, s3Target+"?delete", orig, nil)
+	r.Body = io.NopCloser(strings.NewReader(forged))
+	if err := s3Verifier(t).check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	var d deleteRequest
+	if err := xml.NewDecoder(r.Body).Decode(&d); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	wantKind(t, r.Body.Close(), KindPayloadHashMismatch)
+
+	// The same early stop over the signed body closes cleanly.
+	r = s3Put(t, s3Target+"?delete", orig, nil)
+	if err := s3Verifier(t).check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if err := xml.NewDecoder(r.Body).Decode(&d); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if err := r.Body.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestStreamedCloseUnknownLength(t *testing.T) {
+	// Without a Content-Length, Close reads to EOF, up to
+	// DefaultMaxBodySize, and fails a body it cannot verify within it.
+	r := streamed(t, strings.NewReader(tampered), -1)
+	wantKind(t, r.Body.Close(), KindPayloadHashMismatch)
+
+	r = streamed(t, strings.NewReader(s3Body), -1)
+	if err := r.Body.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestReadBody(t *testing.T) {
+	orig, forged := deleteBodies()
+	v := s3Verifier(t)
+
+	r := s3Put(t, s3Target+"?delete", orig, nil)
+	if err := v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	got, err := v.ReadBody(r, 1<<20)
+	if err != nil || string(got) != orig {
+		t.Fatalf("ReadBody = %d bytes, %v", len(got), err)
+	}
+
+	r = s3Put(t, s3Target+"?delete", orig, nil)
+	r.Body = io.NopCloser(strings.NewReader(forged))
+	if err = v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got, err = v.ReadBody(r, 1<<20); got != nil {
+		t.Fatalf("ReadBody returned the forged body")
+	}
+	wantKind(t, err, KindPayloadHashMismatch)
+
+	r = s3Put(t, s3Target+"?delete", orig, nil)
+	if err = v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	_, err = v.ReadBody(r, int64(len(orig)-1))
+	wantKind(t, err, KindBodyTooLarge)
+}
+
+func TestReadBodyRefusesAnUnverifiedBody(t *testing.T) {
+	// An UNSIGNED-PAYLOAD body is covered by no hash, so it cannot be
+	// returned as verified.
+	r := httptest.NewRequestWithContext(
+		context.Background(), http.MethodPut, s3Target, strings.NewReader(s3Body),
+	)
+	r.Header.Set("X-Amz-Content-Sha256", unsignedPayload)
+	err := s3Signer().SignHTTP(context.Background(), aws.Credentials{
+		AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey,
+	}, r, unsignedPayload, "s3", "eu-west-1", s3SignTime)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	v := s3Verifier(t, WithErrorMap(s3Map))
+	if err = v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	_, err = v.ReadBody(r, 1<<20)
+	var we *wireError
+	if !errors.As(err, &we) {
+		t.Fatalf("ReadBody = %v, want the mapped error", err)
+	}
+	_, err = s3Verifier(t).ReadBody(r, 1<<20)
+	wantKind(t, err, KindUnverifiedPayload)
+
+	// A buffered body is the bytes the signature covered.
+	svc := jsonServices[0]
+	jv := jsonVerifier(t)
+	r = svc.signJSON(t, svc.body)
+	if err = jv.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if got, err := jv.ReadBody(r, 1<<20); err != nil || string(got) != svc.body {
+		t.Fatalf("ReadBody = %q, %v", got, err)
 	}
 }

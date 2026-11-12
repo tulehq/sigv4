@@ -98,6 +98,10 @@ const (
 	// body's read fails with at EOF, not an error from Verify.
 	KindPayloadHashMismatch
 
+	// KindUnverifiedPayload: ReadBody was asked for a body no payload hash
+	// covers, such as an UNSIGNED-PAYLOAD or STREAMING-* one.
+	KindUnverifiedPayload
+
 	// KindSignatureMismatch: the signature is not the one the request and
 	// the signing key produce.
 	KindSignatureMismatch
@@ -126,6 +130,7 @@ var kindNames = [...]string{
 	KindBodyTooLarge:           "BodyTooLarge",
 	KindPayloadHashNotAccepted: "PayloadHashNotAccepted",
 	KindPayloadHashMismatch:    "PayloadHashMismatch",
+	KindUnverifiedPayload:      "UnverifiedPayload",
 	KindSignatureMismatch:      "SignatureMismatch",
 }
 

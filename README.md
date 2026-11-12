@@ -80,15 +80,31 @@ v, err := sigv4.New(
 )
 ```
 
-With a streamed payload, a body that does not match its declared hash fails
-the handler's read, not `Verify`, so an upload reading it is not committed.
-With a known `Content-Length`, the hash is checked on the read that reaches
-that many bytes. A handler that reads exactly `Content-Length` bytes and stops
-(`io.ReadFull`, `io.LimitReader`, `http.MaxBytesReader`) still gets the
-failure. A read past `Content-Length` fails, as does a body that ends short
-of it. With an unknown length, the read that reaches EOF is checked. A
-failing read returns no bytes, because `io.ReadFull` drops an error that
-comes with a full buffer. `WithErrorMap` applies to that read too, so the
+With a streamed payload, the body is checked against its declared hash as
+the handler reads it, and a body that does not match fails a read, not
+`Verify`. What that guarantees is exact. A read error comes only once the
+handler has read the whole body: `Content-Length` bytes when the length is
+known, or to EOF when it is not. With a known length, the read that reaches
+`Content-Length` fails on a mismatch, so a handler that reads exactly that
+much (`io.ReadFull`, `io.LimitReader`, `http.MaxBytesReader`) sees it. So
+does a read past `Content-Length`, and an EOF short of it. A failing read
+returns no bytes, because `io.ReadFull` drops an error that comes with a
+full buffer.
+
+A handler that stops earlier never reaches the check on its reads. A
+decoder does exactly that: it stops at the end of its value, so a forged
+body padded to the same length decodes cleanly. `Close` then reads the rest
+of the body, up to `Content-Length` or, with an unknown length, 1 MiB, and
+returns the mismatch. By then the handler has seen unverified bytes, so it
+must not act on them first. **A handler must read the body to
+`Content-Length` (or EOF), or use `ReadBody`, before acting on its
+bytes.** `v.ReadBody(r, max)` reads the whole body, up to `max` bytes, and
+returns it only once it is verified. It is meant for small control
+documents such as S3 DeleteObjects and CompleteMultipartUpload. It refuses
+a body that no hash covers (`UNSIGNED-PAYLOAD`, `STREAMING-*`) with
+`KindUnverifiedPayload`.
+
+`WithErrorMap` applies to these reads, `Close` and `ReadBody` too, so the
 handler gets the service's own error. `example_test.go` has both setups as
 compiled examples.
 
@@ -159,7 +175,8 @@ codes.
 | `KindBodyUnreadable` | Buffered payload, the body read failed | (streamed payload) | 400 `InvalidParameterException` / `InvalidInputException` |
 | `KindBodyTooLarge` | Buffered payload over the limit | (streamed payload) | 413 `InvalidParameterException` / `InvalidInputException` |
 | `KindPayloadHashNotAccepted` | `X-Amz-Content-Sha256` not hex and not accepted | (any accepted) | 403 `IncompleteSignatureException` |
-| `KindPayloadHashMismatch` | Hex `X-Amz-Content-Sha256` does not match the body, or the body is longer or shorter than `Content-Length` | 400 `XAmzContentSHA256Mismatch`, on the body's read | 400 `InvalidParameterException` / `InvalidInputException` |
+| `KindPayloadHashMismatch` | Hex `X-Amz-Content-Sha256` does not match the body, or the body is longer or shorter than `Content-Length` | 400 `XAmzContentSHA256Mismatch`, on the body's read, `Close` or `ReadBody` | 400 `InvalidParameterException` / `InvalidInputException` |
+| `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers | the service's choice: refuse, or not use `ReadBody` for such a body | (buffered payload is always covered) |
 | `KindSignatureMismatch` | The signature is wrong | 403 `SignatureDoesNotMatch` "The request signature we calculated does not match the signature you provided. Check your key and signing method." | 403 `InvalidSignatureException` |
 | `KindWrongService` | Credential scoped to another service than `WithService` | (not set) | (not set) |
 | `KindKeyLookupFailed` | The `KeySource` failed otherwise, or returned an empty key | internal error | internal error |
