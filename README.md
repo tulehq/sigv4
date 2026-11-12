@@ -159,7 +159,7 @@ codes.
 |---|---|---|---|
 | `KindMissingAuth` | No `Authorization` header (and no presigned URL, when accepted) | 403 `AccessDenied` "Access Denied" | 403 `MissingAuthenticationTokenException` |
 | `KindUnsupportedAlgorithm` | Not `AWS4-HMAC-SHA256` | header: 400 `InvalidRequest`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
-| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
+| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted, unique and at most 128 names | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindInvalidDate` | `X-Amz-Date` missing or malformed | header: 403 `AccessDenied`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindRequestTimeTooSkewed` | `X-Amz-Date` beyond the skew | 403 `RequestTimeTooSkewed` "The difference between the request time and the current time is too large." | 403 `InvalidSignatureException` |
 | `KindInvalidExpires` | `X-Amz-Expires` not 0 to the maximum | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
@@ -205,6 +205,17 @@ authentication, the algorithm, the fields, the date, the skew or presign
 window, the payload hash header, the signed headers and session token, the
 credential's shape, its access key and token, its date and service, the
 body, the payload hash, and last the signature.
+
+## Signed headers
+
+A `SignedHeaders` list must be as SigV4 specifies it: lowercase header names,
+sorted and unique, with no spaces or empty entries, and at most
+`MaxSignedHeaders` (128) of them. Otherwise the request fails with
+`KindIncompleteAuth`. The SDK signers write it that way. Each header is then
+canonicalized once, so the canonical request is no larger than the headers
+the request carries, and the required-header check compares the names
+exactly as they are signed. Every `x-amz-*` header the request carries must
+be in the list.
 
 ## Key sources
 

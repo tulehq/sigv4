@@ -5,11 +5,15 @@ package sigv4
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +233,128 @@ func TestReadBodyRefusesAnUnverifiedBody(t *testing.T) {
 	}
 	if got, err := jv.ReadBody(r, 1<<20); err != nil || string(got) != svc.body {
 		t.Fatalf("ReadBody = %q, %v", got, err)
+	}
+}
+
+func TestSignedHeadersMustBeStrict(t *testing.T) {
+	tests := []struct {
+		list string
+		ok   bool
+	}{
+		{list: "host", ok: true},
+		{list: "content-type;host;x-amz-date;x-amz-target", ok: true},
+		{list: "host;x-amz-date;x-amz-meta-a_b.c", ok: true},
+		{list: ""},
+		{list: "host;"},
+		{list: ";host"},
+		{list: "host;;x-amz-date"},
+		{list: "Host;x-amz-date"},
+		{list: "host;x-amz-date; x-amz-target"},
+		{list: "host ;x-amz-date"},
+		{list: "x-amz-date;host"},
+		{list: "host;host"},
+		{list: "host;x-amz-date;a"},
+		{list: "host;x amz"},
+		{list: "host;x:amz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.list, func(t *testing.T) {
+			names, ok := parseSignedHeaders(tt.list)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if ok && strings.Join(names, ";") != tt.list {
+				t.Fatalf("names = %q", names)
+			}
+		})
+	}
+
+	many := make([]string, MaxSignedHeaders+1)
+	for i := range many {
+		many[i] = fmt.Sprintf("x-h%04d", i)
+	}
+	if _, ok := parseSignedHeaders(strings.Join(many[:MaxSignedHeaders], ";")); !ok {
+		t.Fatalf("%d headers refused", MaxSignedHeaders)
+	}
+	if _, ok := parseSignedHeaders(strings.Join(many, ";")); ok {
+		t.Fatalf("%d headers accepted", MaxSignedHeaders+1)
+	}
+}
+
+// handSigned signs a JSON request by hand, with the SignedHeaders list and
+// canonical headers given, as a client that does not follow the spec could.
+func handSigned(t *testing.T, r *http.Request, signedHeaders, canonHeaders, payload string) {
+	t.Helper()
+	date := signedAt.Format(amzDateFmt)
+	creq := strings.Join([]string{r.Method, "/", "", canonHeaders, signedHeaders, payload}, "\n")
+	sum := sha256.Sum256([]byte(creq))
+	scope := signedAt.Format(dateFmt) + "/us-east-1/secretsmanager/aws4_request"
+	sts := algorithm + "\n" + date + "\n" + scope + "\n" + hex.EncodeToString(sum[:])
+	key := DeriveSigningKey(testSecretKey, signedAt.Format(dateFmt), "us-east-1", "secretsmanager")
+	r.Header.Set("Authorization", algorithm+" Credential="+testAccessKey+"/"+scope+
+		", SignedHeaders="+signedHeaders+", Signature="+hex.EncodeToString(hmacSHA256(key, sts)))
+}
+
+func TestRequiredHeadersAreBoundAsSigned(t *testing.T) {
+	// The required-header check and the canonical request must agree on
+	// the names: " x-amz-target" and "Host" passed the check folded and
+	// trimmed while signing an empty value, so the target or host could be
+	// swapped.
+	const body = `{"SecretId":"prod/db"}`
+	date := signedAt.Format(amzDateFmt)
+	mk := func() *http.Request {
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
+			"http://secrets.local:4000/", strings.NewReader(body))
+		r.Header.Set("X-Amz-Date", date)
+		r.Header.Set(targetHeader, "secretsmanager.GetSecretValue")
+		return r
+	}
+
+	r := mk()
+	handSigned(t, r, "host;x-amz-date; x-amz-target",
+		"host:secrets.local:4000\nx-amz-date:"+date+"\n x-amz-target:\n", sha256Hex(body))
+	r.Header.Set(targetHeader, "secretsmanager.DeleteSecret")
+	wantKind(t, jsonVerifier(t).check(r), KindIncompleteAuth)
+
+	r = mk()
+	handSigned(t, r, "Host;x-amz-date;x-amz-target",
+		"Host:\nx-amz-date:"+date+"\nx-amz-target:secretsmanager.GetSecretValue\n", sha256Hex(body))
+	r.Host = "other-server:9999"
+	wantKind(t, jsonVerifier(t).check(r), KindIncompleteAuth)
+
+	// Signed as the spec says, the same request verifies.
+	r = mk()
+	handSigned(
+		t,
+		r,
+		"host;x-amz-date;x-amz-target",
+		"host:secrets.local:4000\nx-amz-date:"+date+"\nx-amz-target:secretsmanager.GetSecretValue\n",
+		sha256Hex(body),
+	)
+	if err := jsonVerifier(t).check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestRepeatedSignedHeadersDoNotAmplify(t *testing.T) {
+	// A 256 KiB header named a thousand times in SignedHeaders would make a
+	// 256 MiB canonical request before the signature is checked.
+	big := strings.Repeat("x", 256<<10)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
+		"http://secrets.local:4000/", strings.NewReader("{}"))
+	r.Header.Set("X-Amz-Date", signedAt.Format(amzDateFmt))
+	r.Header.Set(targetHeader, "secretsmanager.GetSecretValue")
+	r.Header.Set("A", big)
+	r.Header.Set("Authorization", algorithm+" Credential="+testAccessKey+
+		"/20260304/us-east-1/secretsmanager/aws4_request, SignedHeaders=host;x-amz-date;x-amz-target"+
+		strings.Repeat(";a", 1000)+", Signature=00")
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := jsonVerifier(t).check(r)
+	runtime.ReadMemStats(&after)
+	wantKind(t, err, KindIncompleteAuth)
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > 4<<20 {
+		t.Fatalf("Verify allocated %d MiB", alloc>>20)
 	}
 }

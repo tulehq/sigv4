@@ -163,6 +163,10 @@ func (v *Verifier) parseHeader(r *http.Request) (*signed, *Error) {
 	if err != nil {
 		return nil, err
 	}
+	signedHeaders, ok := parseSignedHeaders(auth.signedHeaders)
+	if !ok {
+		return nil, malformedSignedHeaders(false)
+	}
 
 	date, perr := time.Parse(amzDateFmt, r.Header.Get("X-Amz-Date"))
 	if perr != nil {
@@ -178,7 +182,7 @@ func (v *Verifier) parseHeader(r *http.Request) (*signed, *Error) {
 		date:          date,
 		signature:     auth.signature,
 		payloadHash:   r.Header.Get("X-Amz-Content-Sha256"),
-		signedHeaders: strings.Split(auth.signedHeaders, ";"),
+		signedHeaders: signedHeaders,
 	}
 	if v.streamed && s.payloadHash == "" {
 		return nil, newError(KindMissingPayloadHash, false,
@@ -191,6 +195,10 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 	q := r.URL.Query()
 	if err := checkPresignParams(q); err != nil {
 		return nil, err
+	}
+	signedHeaders, ok := parseSignedHeaders(q.Get("X-Amz-SignedHeaders"))
+	if !ok {
+		return nil, malformedSignedHeaders(true)
 	}
 
 	date, err := time.Parse(amzDateFmt, q.Get("X-Amz-Date"))
@@ -212,7 +220,7 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 		date:          date,
 		signature:     q.Get("X-Amz-Signature"),
 		payloadHash:   r.Header.Get("X-Amz-Content-Sha256"),
-		signedHeaders: strings.Split(q.Get("X-Amz-SignedHeaders"), ";"),
+		signedHeaders: signedHeaders,
 		presigned:     true,
 	}
 	if v.streamed && s.payloadHash == "" {
@@ -313,10 +321,11 @@ func requireAmzHeadersSigned(r *http.Request, s *signed) *Error {
 	return unsignedHeader(s, unsigned[0])
 }
 
+// signsHeader reports whether s signs name, a lowercase header name. The
+// list is sorted and its names exact, as parseSignedHeaders checked.
 func signsHeader(s *signed, name string) bool {
-	return slices.ContainsFunc(s.signedHeaders, func(got string) bool {
-		return strings.EqualFold(strings.TrimSpace(got), name)
-	})
+	_, found := slices.BinarySearch(s.signedHeaders, name)
+	return found
 }
 
 func unsignedHeader(s *signed, name string) *Error {

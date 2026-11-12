@@ -2,6 +2,7 @@ package sigv4
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -39,6 +40,54 @@ func parseAuthorization(auth string) (authHeader, *Error) {
 			"it must contain Credential, SignedHeaders and Signature.")
 	}
 	return h, nil
+}
+
+// MaxSignedHeaders is the most headers a SignedHeaders list may name. The
+// SDK signs every header it sends, a dozen or two; the bound keeps the
+// canonical request small whatever a client claims.
+const MaxSignedHeaders = 128
+
+// parseSignedHeaders splits a SignedHeaders list, reporting false unless it
+// is as SigV4 specifies it: lowercase header names, sorted and unique, with
+// no spaces or empty entries, and at most MaxSignedHeaders of them. Each
+// header is then canonicalized once, so the canonical request is no larger
+// than the headers it covers, and the required-header check matches the
+// names exactly as they are signed.
+func parseSignedHeaders(list string) ([]string, bool) {
+	names := strings.Split(list, ";")
+	if len(names) > MaxSignedHeaders {
+		return nil, false
+	}
+	for i, name := range names {
+		if !isLowerToken(name) || (i > 0 && names[i-1] >= name) {
+			return nil, false
+		}
+	}
+	return names, true
+}
+
+// isLowerToken reports whether s is a non-empty HTTP field name in
+// lowercase.
+func isLowerToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case 'a' <= c && c <= 'z', '0' <= c && c <= '9',
+			strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func malformedSignedHeaders(presigned bool) *Error {
+	return newError(KindIncompleteAuth, presigned, "The SignedHeaders list is malformed; it "+
+		"must name lowercase headers, sorted and unique, and at most "+
+		strconv.Itoa(MaxSignedHeaders)+" of them.")
 }
 
 // presignParams are the query parameters a presigned URL must carry.
