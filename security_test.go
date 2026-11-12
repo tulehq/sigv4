@@ -465,3 +465,19 @@ func TestCanonicalValue(t *testing.T) {
 		}
 	}
 }
+
+func TestEncodedSlashIsNotASlash(t *testing.T) {
+	// The path is canonicalized as sent: a%2Fb is one segment, so a
+	// signature over /bucket/a/b does not cover /bucket/a%2Fb.
+	signed := s3Put(t, "http://localhost:9000/bucket/a/b", s3Body, nil)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPut,
+		"http://localhost:9000/bucket/a%2Fb", strings.NewReader(s3Body))
+	r.Header = signed.Header.Clone()
+	wantKind(t, s3Verifier(t).check(r), KindSignatureMismatch)
+
+	// Signed as sent by the SDK, an encoded slash verifies.
+	r = s3Put(t, "http://localhost:9000/bucket/a%2Fb", s3Body, nil)
+	if err := s3Verifier(t).check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}

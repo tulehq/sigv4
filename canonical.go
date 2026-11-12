@@ -15,7 +15,7 @@ import (
 func signature(r *http.Request, s *signed) string {
 	creq := strings.Join([]string{
 		r.Method,
-		canonicalURI(r.URL.Path),
+		canonicalURI(r.URL),
 		canonicalQuery(r.URL.Query(), s.presigned),
 		canonicalHeaders(r, s.signedHeaders),
 		strings.Join(s.signedHeaders, ";"),
@@ -33,11 +33,27 @@ func signature(r *http.Request, s *signed) string {
 	return hex.EncodeToString(hmacSHA256(s.key.Signing, toSign))
 }
 
-func canonicalURI(p string) string {
+// canonicalURI is the path as the client sent it, each segment decoded and
+// re-encoded. Segments are split on the slashes sent, not on the decoded
+// path's, so an encoded slash, %2F, stays part of its segment: a signature
+// over /bucket/a/b does not cover /bucket/a%2Fb, which a server may read as
+// another key.
+func canonicalURI(u *url.URL) string {
+	p := u.EscapedPath()
 	if p == "" {
 		return "/"
 	}
-	return uriEncode(p, false)
+	segs := strings.Split(p, "/")
+	for i, seg := range segs {
+		dec, err := url.PathUnescape(seg)
+		if err != nil {
+			// EscapedPath is always validly escaped; were it not, encoding the
+			// segment as is gives a path no signer produced.
+			dec = seg
+		}
+		segs[i] = uriEncode(dec, true)
+	}
+	return strings.Join(segs, "/")
 }
 
 // canonicalQuery URI-encodes the query's names and values and sorts it by
