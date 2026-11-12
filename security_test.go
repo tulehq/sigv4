@@ -406,3 +406,27 @@ func TestStreamedFailureIsSticky(t *testing.T) {
 		wantKind(t, err, KindPayloadHashMismatch)
 	}
 }
+
+func TestQuerySortsByKeyThenValue(t *testing.T) {
+	// The SDK sorts the canonical query by encoded name, then by encoded
+	// value; sorting "name=value" strings puts "a-b=2" before "a=1".
+	for _, q := range []string{
+		"a=1&a-b=2", "prefix=x&prefix1=y", "Action=X&Action.1=y", "k=b&k=a&k=", "a%20b=1&a=2",
+	} {
+		t.Run(q, func(t *testing.T) {
+			r := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+				"http://localhost:9000/bucket?"+q, nil)
+			hash := sha256Hex("")
+			r.Header.Set("X-Amz-Content-Sha256", hash)
+			err := s3Signer().SignHTTP(context.Background(), aws.Credentials{
+				AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey,
+			}, r, hash, "s3", "eu-west-1", s3SignTime)
+			if err != nil {
+				t.Fatalf("sign: %v", err)
+			}
+			if err = s3Verifier(t).check(r); err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+		})
+	}
+}

@@ -40,20 +40,39 @@ func canonicalURI(p string) string {
 	return uriEncode(p, false)
 }
 
-// canonicalQuery sorts the query by name and then value, URI-encoding both.
-// A presigned URL's own signature is not part of what it signs.
+// canonicalQuery URI-encodes the query's names and values and sorts it by
+// encoded name, then by encoded value, as the SDK signer does. Sorting the
+// joined "name=value" strings would put "a-b=2" before "a=1". A presigned
+// URL's own signature is not part of what it signs.
 func canonicalQuery(q url.Values, presigned bool) string {
-	var pairs []string
+	type param struct{ key, value string }
+	var params []param
 	for k, vals := range q {
 		if presigned && k == "X-Amz-Signature" {
 			continue
 		}
+		key := uriEncode(k, true)
 		for _, val := range vals {
-			pairs = append(pairs, uriEncode(k, true)+"="+uriEncode(val, true))
+			params = append(params, param{key: key, value: uriEncode(val, true)})
 		}
 	}
-	slices.Sort(pairs)
-	return strings.Join(pairs, "&")
+	slices.SortFunc(params, func(a, b param) int {
+		if c := strings.Compare(a.key, b.key); c != 0 {
+			return c
+		}
+		return strings.Compare(a.value, b.value)
+	})
+
+	var sb strings.Builder
+	for i, p := range params {
+		if i > 0 {
+			sb.WriteByte('&')
+		}
+		sb.WriteString(p.key)
+		sb.WriteByte('=')
+		sb.WriteString(p.value)
+	}
+	return sb.String()
 }
 
 // canonicalHeaders lists the signed headers as "name:value\n" lines, with
