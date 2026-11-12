@@ -179,9 +179,12 @@ func (v *Verifier) ReadBody(r *http.Request, maxBytes int64) ([]byte, error) {
 // short of it. With an unknown length, the read that reaches EOF is checked.
 //
 // A handler that stops earlier, as a decoder does at the end of its value,
-// never reaches the check on its reads; Close reads what it left, up to
-// Content-Length or, when that is unknown, maxDrain, and fails if the body
-// does not match or could not be read to its end.
+// never reaches the check on its reads. Close then reads what it left, as
+// net/http does an unread body: at most maxDrain, and with a known length,
+// nothing when more than that is left. It fails with a mismatch when the
+// body read to its end does not match, and with KindUnverifiedPayload when
+// the body was not read to its end, so a large or slow body does not hold
+// the handler.
 //
 // A failing read returns no bytes: io.ReadFull drops an error that comes
 // with a full buffer, so a read that filled it would hide the failure.
@@ -197,8 +200,10 @@ type payloadVerifier struct {
 	presigned bool
 }
 
-// maxDrain bounds what Close reads of a body of unknown length.
-const maxDrain = DefaultMaxBodySize
+// maxDrain is the most Close reads of what a handler left of a body: the
+// 256 KiB net/http reads of an unread body before it closes the connection
+// instead (maxPostHandlerReadBytes in net/http's server).
+const maxDrain = 256 << 10
 
 func (p *payloadVerifier) Read(b []byte) (int, error) {
 	if p.failed != nil {
@@ -266,14 +271,26 @@ func (p *payloadVerifier) finish() error {
 	}
 	limit := int64(maxDrain)
 	if p.length >= 0 {
+		left := p.length - p.n
+		if left > maxDrain {
+			return p.unverified()
+		}
 		// One byte past Content-Length, to catch a body that runs on.
-		limit = p.length - p.n + 1
+		limit = left + 1
 	}
 	if _, err := io.Copy(io.Discard, io.LimitReader(p, limit)); err != nil {
 		return err //nolint:wrapcheck // a mismatch is already mapped; a read error passes through
 	}
 	if !p.verified {
-		return p.mismatch()
+		return p.unverified()
 	}
 	return nil
+}
+
+// unverified records that the body was not read to its end, so it was
+// never checked.
+func (p *payloadVerifier) unverified() error {
+	p.failed = p.mapErr(newError(KindUnverifiedPayload, p.presigned,
+		"The request body was not read to its end, so it is not verified."))
+	return p.failed
 }

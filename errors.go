@@ -99,7 +99,8 @@ const (
 	KindPayloadHashMismatch
 
 	// KindUnverifiedPayload: ReadBody was asked for a body no payload hash
-	// covers, such as an UNSIGNED-PAYLOAD or STREAMING-* one.
+	// covers, such as an UNSIGNED-PAYLOAD or STREAMING-* one, or a streamed
+	// body was closed with more of it unread than Close reads.
 	KindUnverifiedPayload
 
 	// KindSignatureMismatch: the signature is not the one the request and

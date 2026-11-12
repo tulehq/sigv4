@@ -101,9 +101,12 @@ full buffer.
 
 A handler that stops earlier never reaches the check on its reads. A
 decoder does exactly that: it stops at the end of its value, so a forged
-body padded to the same length decodes cleanly. `Close` then reads the rest
-of the body, up to `Content-Length` or, with an unknown length, 1 MiB, and
-returns the mismatch. By then the handler has seen unverified bytes, so it
+body padded to the same length decodes cleanly. `Close` then reads what the
+handler left, as net/http reads an unread body: at most 256 KiB, and with a
+known length nothing at all when more than that is left. It returns the
+mismatch when the body it read to its end does not match, and
+`KindUnverifiedPayload` when the body was not read to its end, so a large
+or slow body never holds the handler past that. By then the handler has seen unverified bytes, so it
 must not act on them first. **A handler must read the body to
 `Content-Length` (or EOF), or use `ReadBody`, before acting on its
 bytes.** `v.ReadBody(r, max)` reads the whole body, up to `max` bytes, and
@@ -188,7 +191,7 @@ codes.
 | `KindBodyTooLarge` | Buffered payload over the limit | (streamed payload) | 413 `InvalidParameterException` / `InvalidInputException` |
 | `KindPayloadHashNotAccepted` | `X-Amz-Content-Sha256` not hex and not accepted | (any accepted) | 403 `IncompleteSignatureException` |
 | `KindPayloadHashMismatch` | Hex `X-Amz-Content-Sha256` does not match the body, or the body is longer or shorter than `Content-Length` | 400 `XAmzContentSHA256Mismatch`, on the body's read, `Close` or `ReadBody` | 400 `InvalidParameterException` / `InvalidInputException` |
-| `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers | the service's choice: refuse, or not use `ReadBody` for such a body | (buffered payload is always covered) |
+| `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers, or `Close` with more of a streamed body unread than it reads | the service's choice: refuse, or not use `ReadBody` for such a body | (buffered payload is always covered) |
 | `KindSignatureMismatch` | The signature is wrong | 403 `SignatureDoesNotMatch` "The request signature we calculated does not match the signature you provided. Check your key and signing method." | 403 `InvalidSignatureException` |
 | `KindWrongService` | Credential scoped to another service than `WithService` | (not set) | (not set) |
 | `KindKeyLookupFailed` | The `KeySource` failed otherwise, or returned an empty key or a principal with no account ID | internal error | internal error |
