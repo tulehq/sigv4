@@ -243,6 +243,9 @@ func (v *Verifier) finishParse(r *http.Request, s *signed, cred string) (*signed
 	if err := v.requireSignedHeaders(s); err != nil {
 		return nil, err
 	}
+	if err := requireAmzHeadersSigned(r, s); err != nil {
+		return nil, err
+	}
 	if err := readSessionToken(r, s); err != nil {
 		return nil, err
 	}
@@ -288,6 +291,28 @@ func (v *Verifier) requireSignedHeaders(s *signed) *Error {
 	return nil
 }
 
+// requireAmzHeadersSigned rejects a request that carries an x-amz-* header
+// the signature does not cover, naming the first in sorted order. AWS
+// requires every x-amz-* header sent to be signed: left unsigned, one such
+// as X-Amz-Copy-Source would let whoever relays a signed upload turn it into
+// a copy of another object. The SDK signer signs every one it sends; on a
+// presigned URL it hoists those it does not keep as headers into the query,
+// where the canonical query covers them.
+func requireAmzHeadersSigned(r *http.Request, s *signed) *Error {
+	var unsigned []string
+	for name := range r.Header {
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "x-amz-") && !signsHeader(s, lower) {
+			unsigned = append(unsigned, lower)
+		}
+	}
+	if len(unsigned) == 0 {
+		return nil
+	}
+	slices.Sort(unsigned)
+	return unsignedHeader(s, unsigned[0])
+}
+
 func signsHeader(s *signed, name string) bool {
 	return slices.ContainsFunc(s.signedHeaders, func(got string) bool {
 		return strings.EqualFold(strings.TrimSpace(got), name)
@@ -304,14 +329,11 @@ func unsignedHeader(s *signed, name string) *Error {
 // readSessionToken takes the session token from the X-Amz-Security-Token
 // header or query parameter, as the SDK signer sends it: a header on a
 // signed request, a parameter of a presigned URL. A parameter is part of the
-// canonical query, so always signed; a header must be among the signed
-// headers, or whoever relays the request could attach another token.
+// canonical query, so always signed; a header, like every x-amz-* header,
+// has been checked to be among the signed headers.
 func readSessionToken(r *http.Request, s *signed) *Error {
 	header := r.Header.Get(tokenHeader)
 	param := r.URL.Query().Get(tokenHeader)
-	if header != "" && !signsHeader(s, strings.ToLower(tokenHeader)) {
-		return unsignedHeader(s, strings.ToLower(tokenHeader))
-	}
 	if header != "" && param != "" && header != param {
 		return newError(KindInvalidSessionToken, s.presigned,
 			"The security token included in the request is invalid.")

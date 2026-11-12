@@ -59,7 +59,9 @@ func TestJSONVerifyAcceptsASignedRequest(t *testing.T) {
 // rejectCase is one way a request can fail verification: how to break a
 // correctly signed request, and the error type that must come back.
 type rejectCase struct {
-	tamper   func(svc jsonService, r *http.Request)
+	tamper func(svc jsonService, r *http.Request)
+	// request signs the request in place of signJSON.
+	request  func(t *testing.T, svc jsonService) *http.Request
 	verifier func(t *testing.T) *Verifier
 	wantType func(svc jsonService) string
 	name     string
@@ -78,6 +80,20 @@ func rejectCases() []rejectCase {
 
 func headerRejectCases() []rejectCase {
 	return []rejectCase{
+		{
+			// Declared and signed, as every x-amz-* header must be.
+			name: "declared payload hash does not match the body",
+			request: func(t *testing.T, svc jsonService) *http.Request {
+				t.Helper()
+				hash := strings.Repeat("a", 64)
+				return svc.signWith(t, svc.body, hash, map[string]string{
+					"Content-Type":         jsonType,
+					targetHeader:           svc.readTarget,
+					"X-Amz-Content-Sha256": hash,
+				})
+			},
+			wantType: func(svc jsonService) string { return svc.invalidInput },
+		},
 		{
 			name:     "no Authorization header",
 			tamper:   func(_ jsonService, r *http.Request) { r.Header.Del("Authorization") },
@@ -124,13 +140,6 @@ func signatureRejectCases() []rejectCase {
 			wantType: fixedType(typeInvalidSignature),
 		},
 		{
-			name: "declared payload hash does not match the body",
-			tamper: func(_ jsonService, r *http.Request) {
-				r.Header.Set("X-Amz-Content-Sha256", strings.Repeat("a", 64))
-			},
-			wantType: func(svc jsonService) string { return svc.invalidInput },
-		},
-		{
 			name: "unknown access key",
 			verifier: func(t *testing.T) *Verifier {
 				t.Helper()
@@ -172,6 +181,9 @@ func TestJSONVerifyRejects(t *testing.T) {
 		for _, tt := range rejectCases() {
 			t.Run(svc.name+"/"+tt.name, func(t *testing.T) {
 				req := svc.signJSON(t, svc.body)
+				if tt.request != nil {
+					req = tt.request(t, svc)
+				}
 				if tt.tamper != nil {
 					tt.tamper(svc, req)
 				}
