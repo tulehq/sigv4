@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -269,15 +270,14 @@ func TestSignedHeadersMustBeStrict(t *testing.T) {
 		})
 	}
 
-	many := make([]string, MaxSignedHeaders+1)
+	// No count cap: a list's names are unique, so it is no longer than the
+	// headers it names.
+	many := make([]string, 1000)
 	for i := range many {
 		many[i] = fmt.Sprintf("x-h%04d", i)
 	}
-	if _, ok := parseSignedHeaders(strings.Join(many[:MaxSignedHeaders], ";")); !ok {
-		t.Fatalf("%d headers refused", MaxSignedHeaders)
-	}
-	if _, ok := parseSignedHeaders(strings.Join(many, ";")); ok {
-		t.Fatalf("%d headers accepted", MaxSignedHeaders+1)
+	if _, ok := parseSignedHeaders(strings.Join(many, ";")); !ok {
+		t.Fatalf("%d sorted unique names refused", len(many))
 	}
 }
 
@@ -479,5 +479,48 @@ func TestEncodedSlashIsNotASlash(t *testing.T) {
 	r = s3Put(t, "http://localhost:9000/bucket/a%2Fb", s3Body, nil)
 	if err := s3Verifier(t).check(r); err != nil {
 		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestManySignedMetadataHeadersVerify(t *testing.T) {
+	// S3 allows 2 KB of user metadata in 8 KB of headers, so a PutObject can
+	// sign well over a hundred x-amz-meta-* headers.
+	headers := map[string]string{}
+	for i := range 130 {
+		headers[fmt.Sprintf("X-Amz-Meta-M%03d", i)] = "v"
+	}
+	if err := s3Verifier(t).check(s3Put(t, s3Target, s3Body, headers)); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestDistinctSignedHeadersStayLinear(t *testing.T) {
+	// A thousand distinct names over 400 KiB of headers: the canonical
+	// request is no larger than the headers, so the work stays linear.
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
+		"http://secrets.local:4000/", strings.NewReader("{}"))
+	r.Header.Set("X-Amz-Date", signedAt.Format(amzDateFmt))
+	r.Header.Set(targetHeader, "secretsmanager.GetSecretValue")
+	names := make([]string, 0, 1003)
+	names = append(names, "host", "x-amz-date", "x-amz-target")
+	for i := range 1000 {
+		name := fmt.Sprintf("z%04d", i)
+		names = append(names, name)
+		r.Header.Set(name, strings.Repeat("v", 400))
+	}
+	slices.Sort(names)
+	r.Header.Set("Authorization", algorithm+" Credential="+testAccessKey+
+		"/20260304/us-east-1/secretsmanager/aws4_request, SignedHeaders="+
+		strings.Join(names, ";")+", Signature=00")
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := jsonVerifier(t).check(r)
+	runtime.ReadMemStats(&after)
+	wantKind(t, err, KindSignatureMismatch)
+	// Linear, not quadratic: a few copies of the canonical request.
+	bound := uint64(16 * 400 * 1000)
+	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > bound {
+		t.Fatalf("Verify allocated %d bytes, over %d", alloc, bound)
 	}
 }

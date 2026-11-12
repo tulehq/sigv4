@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,8 +36,8 @@ func FuzzCanonicalHeaders(f *testing.F) {
 		if !ok {
 			return
 		}
-		if len(names) > MaxSignedHeaders {
-			t.Fatalf("%d names accepted", len(names))
+		if !slices.IsSorted(names) || len(slices.Compact(slices.Clone(names))) != len(names) {
+			t.Fatalf("names %q are not sorted and unique", names)
 		}
 		// Each name is canonicalized once, so the canonical headers are no
 		// larger than the list, the headers sent and a Content-Length.

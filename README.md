@@ -174,7 +174,7 @@ codes.
 |---|---|---|---|
 | `KindMissingAuth` | No `Authorization` header (and no presigned URL, when accepted) | 403 `AccessDenied` "Access Denied" | 403 `MissingAuthenticationTokenException` |
 | `KindUnsupportedAlgorithm` | Not `AWS4-HMAC-SHA256` | header: 400 `InvalidRequest`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
-| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted, unique and at most 128 names | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
+| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted and unique | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindInvalidDate` | `X-Amz-Date` missing or malformed | header: 403 `AccessDenied`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindRequestTimeTooSkewed` | `X-Amz-Date` beyond the skew | 403 `RequestTimeTooSkewed` "The difference between the request time and the current time is too large." | 403 `InvalidSignatureException` |
 | `KindInvalidExpires` | `X-Amz-Expires` not 1 to the maximum, "X-Amz-Expires must be a number of seconds between 1 and 604800" | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
@@ -224,12 +224,15 @@ body, the payload hash, and last the signature.
 ## Signed headers
 
 A `SignedHeaders` list must be as SigV4 specifies it: lowercase header names,
-sorted and unique, with no spaces or empty entries, and at most
-`MaxSignedHeaders` (128) of them. Otherwise the request fails with
-`KindIncompleteAuth`. The SDK signers write it that way. Each header is then
-canonicalized once, so the canonical request is no larger than the headers
-the request carries, and the required-header check compares the names
-exactly as they are signed. Every `x-amz-*` header the request carries must
+sorted and unique, with no spaces or empty entries. Otherwise the request
+fails with `KindIncompleteAuth`. The SDK signers write it that way. Each
+header is then canonicalized once, so the canonical request is no larger
+than the list and the headers it names, and the required-header check
+compares the names exactly as they are signed. The number of names is not
+capped. Unique names already bound the work by the request's header size,
+which the HTTP server bounds in turn (1 MiB by default in net/http). And S3
+lets a PutObject sign more than a hundred `x-amz-meta-*` headers, within
+its 8 KB of request headers. Every `x-amz-*` header the request carries must
 be in the list.
 
 ## Key sources
