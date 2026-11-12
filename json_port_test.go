@@ -145,7 +145,7 @@ func signatureRejectCases() []rejectCase {
 				t.Helper()
 				return mustNew(
 					t,
-					NewStaticKey(
+					mustStatic(t,
 						StaticKeyConfig{AccessKeyID: "OTHER", SecretAccessKey: testSecretKey},
 					),
 					append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
@@ -158,7 +158,7 @@ func signatureRejectCases() []rejectCase {
 				t.Helper()
 				return mustNew(
 					t,
-					NewStaticKey(
+					mustStatic(t,
 						StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: "wrong"},
 					),
 					append(jsonOptions(), WithClock(fixedClock(signedAt)))...)

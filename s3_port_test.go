@@ -31,7 +31,7 @@ func s3Verifier(t *testing.T, opts ...Option) *Verifier {
 	all := append(s3Options(), WithClock(fixedClock(s3SignTime.Add(time.Minute))))
 	return mustNew(
 		t,
-		NewStaticKey(StaticKeyConfig{AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey}),
+		mustStatic(t, StaticKeyConfig{AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey}),
 		append(all, opts...)...)
 }
 

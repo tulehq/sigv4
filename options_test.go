@@ -15,7 +15,7 @@ import (
 )
 
 func TestNewRejectsBadOptions(t *testing.T) {
-	keys := NewStaticKey(
+	keys := mustStatic(t,
 		StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey},
 	)
 	tests := []struct {
@@ -52,7 +52,7 @@ func TestDefaults(t *testing.T) {
 	svc := jsonServices[0]
 	v := mustNew(
 		t,
-		NewStaticKey(StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey}),
+		mustStatic(t, StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey}),
 		WithClock(fixedClock(signedAt)),
 	)
 
@@ -273,7 +273,7 @@ func (f keyFunc) SigningKey(ctx context.Context, scope Scope) (Key, error) {
 
 func TestKeySourceGetsTheCredentialScope(t *testing.T) {
 	svc := jsonServices[0]
-	static := NewStaticKey(
+	static := mustStatic(t,
 		StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey},
 	)
 
@@ -363,7 +363,7 @@ func TestStaticKey(t *testing.T) {
 	ctx := context.Background()
 	scope := Scope{AccessKeyID: "AKID", Date: "20261015", Region: "us-east-1", Service: "s3"}
 
-	key, err := NewStaticKey(StaticKeyConfig{AccessKeyID: "AKID", SecretAccessKey: "secret"}).
+	key, err := mustStatic(t, StaticKeyConfig{AccessKeyID: "AKID", SecretAccessKey: "secret"}).
 		SigningKey(ctx, scope)
 	if err != nil {
 		t.Fatalf("SigningKey: %v", err)
@@ -378,7 +378,7 @@ func TestStaticKey(t *testing.T) {
 		t.Fatalf("signing key = %x", key.Signing)
 	}
 
-	named := NewStaticKey(StaticKeyConfig{
+	named := mustStatic(t, StaticKeyConfig{
 		AccessKeyID: "AKID", SecretAccessKey: "secret",
 		AccountID: "123456789012", ARN: "arn:aws:iam::123456789012:user/dev",
 	})
@@ -389,7 +389,9 @@ func TestStaticKey(t *testing.T) {
 		key.Principal.AccountID != "123456789012" {
 		t.Fatalf("principal = %+v", key.Principal)
 	}
-	accountOnly := NewStaticKey(StaticKeyConfig{AccessKeyID: "AKID", AccountID: "123456789012"})
+	accountOnly := mustStatic(t, StaticKeyConfig{
+		AccessKeyID: "AKID", SecretAccessKey: "secret", AccountID: "123456789012",
+	})
 	if key, _ = accountOnly.SigningKey(
 		ctx,
 		scope,
@@ -478,6 +480,20 @@ func TestVerifyConcurrently(t *testing.T) {
 	for i, err := range errs {
 		if err != nil {
 			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+}
+
+func TestStaticKeyRefusesAnEmptyKey(t *testing.T) {
+	// An empty access key ID and secret would accept a request signed with
+	// an empty key, which any client can produce.
+	for _, cfg := range []StaticKeyConfig{
+		{},
+		{AccessKeyID: "AKID"},
+		{SecretAccessKey: "secret"},
+	} {
+		if k, err := NewStaticKey(cfg); err == nil || k != nil {
+			t.Fatalf("NewStaticKey(%+v) = %v, %v; want an error", cfg, k, err)
 		}
 	}
 }

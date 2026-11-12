@@ -54,11 +54,15 @@ that checks the body against its declared hash.
 An AWS JSON service, such as secret-store or accounts:
 
 ```go
+keys, err := sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+	AccessKeyID:     cfg.AccessKeyID,
+	SecretAccessKey: cfg.SecretAccessKey,
+})
+if err != nil {
+	return err
+}
 v, err := sigv4.New(
-	sigv4.NewStaticKey(sigv4.StaticKeyConfig{
-		AccessKeyID:     cfg.AccessKeyID,
-		SecretAccessKey: cfg.SecretAccessKey,
-	}),
+	keys,
 	sigv4.WithRequiredSignedHeaders("host", "x-amz-date", "x-amz-target"),
 	sigv4.WithErrorMap(toAPIError), // func(*sigv4.Error) error
 )
@@ -67,11 +71,15 @@ v, err := sigv4.New(
 S3, as object-store verifies:
 
 ```go
+keys, err := sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+	AccessKeyID:     cfg.AccessKeyID,
+	SecretAccessKey: cfg.SecretAccessKey,
+})
+if err != nil {
+	return err
+}
 v, err := sigv4.New(
-	sigv4.NewStaticKey(sigv4.StaticKeyConfig{
-		AccessKeyID:     cfg.AccessKeyID,
-		SecretAccessKey: cfg.SecretAccessKey,
-	}),
+	keys,
 	sigv4.WithPresignedURLs(true),
 	sigv4.WithStreamedPayload(),
 	sigv4.WithAnyPayloadHash(true),
@@ -259,6 +267,7 @@ context is passed through. A `KeySource` must be safe for concurrent use.
 
 `NewStaticKey(StaticKeyConfig{...})` knows one long-term access key, in any
 region and for any service, which is what each Tule service accepts today.
+It returns an error when the access key ID or secret is empty.
 It refuses any request that carries a session token. Its principal's
 `AccountID` defaults to `DefaultAccountID` (`000000000000`), and its `ARN` to
 the account's root user, `arn:aws:iam::<AccountID>:root`.

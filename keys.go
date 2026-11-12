@@ -91,8 +91,13 @@ type StaticKey struct {
 
 // NewStaticKey returns a KeySource that knows only cfg's access key, in any
 // region and for any service. The key is long-term, so a request that
-// carries a session token is refused with ErrInvalidSessionToken.
-func NewStaticKey(cfg StaticKeyConfig) *StaticKey {
+// carries a session token is refused with ErrInvalidSessionToken. It fails
+// when the access key ID or the secret is empty: a request signed with an
+// empty key is one any client can produce.
+func NewStaticKey(cfg StaticKeyConfig) (*StaticKey, error) {
+	if cfg.AccessKeyID == "" || cfg.SecretAccessKey == "" {
+		return nil, errors.New("sigv4: a static key needs an access key ID and a secret")
+	}
 	if cfg.AccountID == "" {
 		cfg.AccountID = DefaultAccountID
 	}
@@ -106,7 +111,7 @@ func NewStaticKey(cfg StaticKeyConfig) *StaticKey {
 			ARN:         cfg.ARN,
 			AccessKeyID: cfg.AccessKeyID,
 		},
-	}
+	}, nil
 }
 
 // SigningKey returns the key scope signs with, ErrUnknownAccessKey when scope

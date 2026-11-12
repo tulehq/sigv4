@@ -59,12 +59,16 @@ func verifySignature(v *sigv4.Verifier, next http.Handler) http.Handler {
 // An AWS JSON service: the defaults, plus X-Amz-Target among the headers the
 // signature must cover, since it names the operation.
 func ExampleNew_json() {
+	keys, err := sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+		AccessKeyID:     "AKIDEXAMPLE",
+		SecretAccessKey: "secret",
+		AccountID:       "000000000000",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	v, err := sigv4.New(
-		sigv4.NewStaticKey(sigv4.StaticKeyConfig{
-			AccessKeyID:     "AKIDEXAMPLE",
-			SecretAccessKey: "secret",
-			AccountID:       "000000000000",
-		}),
+		keys,
 		sigv4.WithRequiredSignedHeaders("host", "x-amz-date", "x-amz-target"),
 		sigv4.WithErrorMap(jsonError),
 	)
@@ -77,12 +81,16 @@ func ExampleNew_json() {
 // An S3 service: presigned URLs, a streamed payload checked against the
 // declared hash as the handler reads it, and any declared hash accepted.
 func ExampleNew_s3() {
+	keys, err := sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+		AccessKeyID:     "AKIDEXAMPLE",
+		SecretAccessKey: "secret",
+		AccountID:       "000000000000",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	v, err := sigv4.New(
-		sigv4.NewStaticKey(sigv4.StaticKeyConfig{
-			AccessKeyID:     "AKIDEXAMPLE",
-			SecretAccessKey: "secret",
-			AccountID:       "000000000000",
-		}),
+		keys,
 		sigv4.WithPresignedURLs(true),
 		sigv4.WithStreamedPayload(),
 		sigv4.WithAnyPayloadHash(true),

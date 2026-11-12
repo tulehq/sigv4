@@ -90,7 +90,7 @@ func (svc sdkService) verifier(t *testing.T, opts ...Option) *Verifier {
 	all := slices.Concat(svc.opts, []Option{clock}, opts)
 	return mustNew(
 		t,
-		NewStaticKey(StaticKeyConfig{AccessKeyID: sdkAccessKey, SecretAccessKey: sdkSecretKey}),
+		mustStatic(t, StaticKeyConfig{AccessKeyID: sdkAccessKey, SecretAccessKey: sdkSecretKey}),
 		all...)
 }
 

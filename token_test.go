@@ -125,7 +125,7 @@ func TestSessionTokenRefused(t *testing.T) {
 		{name: "expired token", keys: tempKeys{expired: true}, want: KindExpiredSessionToken},
 		{
 			name: "static key refuses a token",
-			keys: NewStaticKey(StaticKeyConfig{
+			keys: mustStatic(t, StaticKeyConfig{
 				AccessKeyID: tempAccessKey, SecretAccessKey: tempSecretKey,
 			}),
 			want: KindInvalidSessionToken,

@@ -36,6 +36,16 @@ func fixedClock(t time.Time) func() time.Time {
 	return func() time.Time { return t }
 }
 
+// mustStatic returns NewStaticKey(cfg), failing t on an error.
+func mustStatic(t testing.TB, cfg StaticKeyConfig) *StaticKey {
+	t.Helper()
+	k, err := NewStaticKey(cfg)
+	if err != nil {
+		t.Fatalf("NewStaticKey: %v", err)
+	}
+	return k
+}
+
 // check verifies r, keeping only the error, for the tests that need no more.
 func (v *Verifier) check(r *http.Request) error {
 	_, err := v.Verify(r)
@@ -104,7 +114,7 @@ func jsonVerifier(t *testing.T, opts ...Option) *Verifier {
 	all := append(jsonOptions(), WithClock(fixedClock(signedAt)))
 	return mustNew(
 		t,
-		NewStaticKey(StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey}),
+		mustStatic(t, StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey}),
 		append(all, opts...)...)
 }
 
