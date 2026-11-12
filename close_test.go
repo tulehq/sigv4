@@ -167,3 +167,54 @@ func TestCloseDoesNotWaitOnASlowClient(t *testing.T) {
 	}
 	wantKind(t, <-closed, KindUnverifiedPayload)
 }
+
+// closingBody fails every read after Close, as net/http's request body does.
+type closingBody struct {
+	r      io.Reader
+	closed bool
+}
+
+func (c *closingBody) Read(b []byte) (int, error) {
+	if c.closed {
+		return 0, errors.New("http: invalid Read on closed Body")
+	}
+	return c.r.Read(b) //nolint:wrapcheck // io.Reader contract
+}
+
+func (c *closingBody) Close() error {
+	c.closed = true
+	return nil
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		read bool
+		want Kind // 0 for a clean close
+	}{
+		{name: "read in full", body: s3Body, read: true},
+		{name: "left unread", body: s3Body},
+		{name: "mismatch", body: tampered, want: KindPayloadHashMismatch},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := declared(t, int64(len(s3Body)), strings.NewReader(tt.body))
+			r.Body.(*payloadVerifier).body = &closingBody{r: strings.NewReader(tt.body)}
+			if tt.read {
+				if _, err := io.ReadAll(r.Body); err != nil {
+					t.Fatalf("read: %v", err)
+				}
+			}
+			for i := range 2 {
+				err := r.Body.Close()
+				if tt.want == 0 {
+					if err != nil {
+						t.Fatalf("Close %d: %v", i+1, err)
+					}
+					continue
+				}
+				wantKind(t, err, tt.want)
+			}
+		})
+	}
+}

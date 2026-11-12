@@ -192,11 +192,13 @@ type payloadVerifier struct {
 	body      io.ReadCloser
 	h         hash.Hash
 	failed    error // the first failure, which every later read returns
+	closeErr  error // what the first Close returned
 	mapErr    func(*Error) error
 	want      string
 	length    int64 // Content-Length, or -1 when unknown
 	n         int64 // bytes read so far
 	verified  bool  // the whole body was read and matched
+	closed    bool
 	presigned bool
 }
 
@@ -253,14 +255,18 @@ func (p *payloadVerifier) mismatch() error {
 }
 
 // Close reads what the handler left of the body and fails if the body does
-// not match its hash, then closes it.
+// not match its hash, then closes it. A second Close returns what the first
+// did, without reading the closed body again.
 func (p *payloadVerifier) Close() error {
-	verr := p.finish()
-	cerr := p.body.Close()
-	if verr != nil {
-		return verr
+	if p.closed {
+		return p.closeErr
 	}
-	return cerr //nolint:wrapcheck // passes the body's close error through
+	p.closed = true
+	p.closeErr = p.finish()
+	if cerr := p.body.Close(); p.closeErr == nil {
+		p.closeErr = cerr
+	}
+	return p.closeErr //nolint:wrapcheck // a mismatch is already mapped; a close error passes through
 }
 
 // finish reads the rest of the body through Read, so it is checked, and
