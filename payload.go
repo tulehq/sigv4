@@ -188,6 +188,7 @@ func (v *Verifier) ReadBody(r *http.Request, maxBytes int64) ([]byte, error) {
 type payloadVerifier struct {
 	body      io.ReadCloser
 	h         hash.Hash
+	failed    error // the first failure, which every later read returns
 	mapErr    func(*Error) error
 	want      string
 	length    int64 // Content-Length, or -1 when unknown
@@ -200,6 +201,9 @@ type payloadVerifier struct {
 const maxDrain = DefaultMaxBodySize
 
 func (p *payloadVerifier) Read(b []byte) (int, error) {
+	if p.failed != nil {
+		return 0, p.failed
+	}
 	n, err := p.body.Read(b)
 	if p.length >= 0 && p.n+int64(n) > p.length {
 		// The body runs past Content-Length, which the hash does not cover.
@@ -237,8 +241,10 @@ func (p *payloadVerifier) matches() bool {
 	return strings.EqualFold(hex.EncodeToString(p.h.Sum(nil)), p.want)
 }
 
+// mismatch records the body's failure, so every later read returns it too.
 func (p *payloadVerifier) mismatch() error {
-	return p.mapErr(newError(KindPayloadHashMismatch, p.presigned, hashMismatchText))
+	p.failed = p.mapErr(newError(KindPayloadHashMismatch, p.presigned, hashMismatchText))
+	return p.failed
 }
 
 // Close reads what the handler left of the body and fails if the body does
@@ -255,6 +261,9 @@ func (p *payloadVerifier) Close() error {
 // finish reads the rest of the body through Read, so it is checked, and
 // reports a body that does not match or was not read to its end.
 func (p *payloadVerifier) finish() error {
+	if p.failed != nil {
+		return p.failed
+	}
 	limit := int64(maxDrain)
 	if p.length >= 0 {
 		// One byte past Content-Length, to catch a body that runs on.

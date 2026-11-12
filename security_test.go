@@ -358,3 +358,51 @@ func TestRepeatedSignedHeadersDoNotAmplify(t *testing.T) {
 		t.Fatalf("Verify allocated %d MiB", alloc>>20)
 	}
 }
+
+func TestNilErrorMapFailsClosed(t *testing.T) {
+	nilMap := WithErrorMap(func(*Error) error { return nil })
+
+	svc := jsonServices[0]
+	r := svc.signJSON(t, svc.body)
+	r.Header.Set("Authorization", algorithm+" Credential=x/y/z/w/aws4_request, "+
+		"SignedHeaders=host, Signature=00")
+	got, err := jsonVerifier(t, nilMap).Verify(r)
+	if got != nil {
+		t.Fatalf("Verify returned a request for a failed verification")
+	}
+	wantKind(t, err, KindUnsignedHeader)
+
+	// A streamed body that fails must keep failing, not read as an empty
+	// body that never ends.
+	r = s3Put(t, s3Target, s3Body, nil)
+	r.Body = io.NopCloser(strings.NewReader(tampered))
+	if err = s3Verifier(t, nilMap).check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, rerr := io.ReadAll(r.Body)
+		done <- rerr
+	}()
+	select {
+	case err = <-done:
+		wantKind(t, err, KindPayloadHashMismatch)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ReadAll did not return")
+	}
+	wantKind(t, r.Body.Close(), KindPayloadHashMismatch)
+}
+
+func TestStreamedFailureIsSticky(t *testing.T) {
+	r := streamed(t, strings.NewReader(tampered), int64(len(s3Body)))
+	b := make([]byte, len(s3Body))
+	_, err := io.ReadFull(r.Body, b)
+	wantKind(t, err, KindPayloadHashMismatch)
+	for i := range 3 {
+		n, err := r.Body.Read(b)
+		if n != 0 {
+			t.Fatalf("read %d returned %d bytes", i, n)
+		}
+		wantKind(t, err, KindPayloadHashMismatch)
+	}
+}

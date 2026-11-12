@@ -141,11 +141,16 @@ func (v *Verifier) verify(r *http.Request) (*signed, *Error) {
 	return s, nil
 }
 
+// mapError passes e through the WithErrorMap function. A failure must never
+// read as success, so a map that returns nil gets e back.
 func (v *Verifier) mapError(e *Error) error {
 	if v.mapErr == nil {
 		return e
 	}
-	return v.mapErr(e)
+	if err := v.mapErr(e); err != nil {
+		return err
+	}
+	return e
 }
 
 // parse reads what r claims about its signature, from a presigned URL when

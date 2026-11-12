@@ -121,8 +121,9 @@ func WithMaxPresignExpiry(d time.Duration) Option {
 }
 
 // WithErrorMap sets the function every verification failure passes through,
-// so Verify, and a streamed body's read, return the service's own wire
-// error. Without it they return the *Error.
+// so Verify, a streamed body's read and Close, and ReadBody return the
+// service's own wire error. Without it, or where it returns nil, they return
+// the *Error.
 func WithErrorMap(mapErr func(*Error) error) Option {
 	return func(v *Verifier) { v.mapErr = mapErr }
 }
