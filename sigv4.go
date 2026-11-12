@@ -56,6 +56,7 @@ type Verifier struct {
 	allowUnsigned  bool
 	allowStreaming bool
 	allowAnyHash   bool
+	s3Path         bool
 }
 
 // New returns a Verifier over keys. Without options it accepts Authorization
@@ -131,7 +132,7 @@ func (v *Verifier) verify(r *http.Request) (*signed, *Error) {
 		return nil, err
 	}
 
-	uri, ok := canonicalURI(r.URL)
+	uri, ok := canonicalURI(r.URL, v.s3Path)
 	if !ok {
 		return nil, newError(KindIncompleteAuth, s.presigned,
 			"The request path is not a consistent encoding of the path it names.")

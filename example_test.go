@@ -92,6 +92,7 @@ func ExampleNew_s3() {
 	v, err := sigv4.New(
 		keys,
 		sigv4.WithPresignedURLs(true),
+		sigv4.WithS3PathEncoding(),
 		sigv4.WithStreamedPayload(),
 		sigv4.WithAnyPayloadHash(true),
 		sigv4.WithRequiredSignedHeaders(),

@@ -81,6 +81,7 @@ if err != nil {
 v, err := sigv4.New(
 	keys,
 	sigv4.WithPresignedURLs(true),
+	sigv4.WithS3PathEncoding(),
 	sigv4.WithStreamedPayload(),
 	sigv4.WithAnyPayloadHash(true),
 	sigv4.WithRequiredSignedHeaders(),
@@ -133,6 +134,7 @@ compiled examples.
 |---|---|---|
 | `WithPresignedURLs(bool)` | off | Accept the `X-Amz-*` query parameters of a presigned URL in place of the header. Off, they are plain query parameters. |
 | `WithBufferedPayload(max)` | on, `DefaultMaxBodySize` (1 MiB) | Read the body up to `max` bytes and hash it. An absent `X-Amz-Content-Sha256` signs the body's own hash, as the SDKs sign AWS JSON calls; a hex one must match the body. |
+| `WithS3PathEncoding()` | off: encoded twice | Sign the path URI-encoded once, as S3 does. Every other service encodes it twice, as SigV4 specifies and the SDK signs it. |
 | `WithStreamedPayload()` | off | Leave the body to the handler. `X-Amz-Content-Sha256` is required on a header request and defaults to `UNSIGNED-PAYLOAD` on a presigned one; a hex value is checked as the body is read. |
 | `WithUnsignedPayload(bool)` | off | Accept `UNSIGNED-PAYLOAD`. |
 | `WithStreamingPayload(bool)` | off | Accept `STREAMING-*`. |
@@ -315,11 +317,17 @@ disagree fail with `KindInvalidSessionToken`. The token then goes to the
 
 ## Paths
 
-The canonical URI is the path as the client sent it, split on the slashes
-sent and each segment decoded and re-encoded. An encoded slash (`%2F`) stays
-inside its segment, so a signature over `/bucket/a/b` never verifies
-`/bucket/a%2Fb`, and no signature verifies a request whose decoded path
-differs from the one signed. That holds even when the raw path is not
+The canonical URI is the path as the client sent it. For every service but
+S3 it is URI-encoded once more, `%` included, as SigV4 specifies and the SDK
+signs it: `/a%20b` is signed as `/a%2520b`. With `WithS3PathEncoding`, which
+an S3 service sets, the path is split on the slashes sent and each segment
+decoded and re-encoded, as S3 signs it encoded once. The JSON services need
+nothing: they are not S3, and the default is what their clients sign.
+
+In both modes an encoded slash (`%2F`) stays inside its segment, so a
+signature over `/bucket/a/b` never verifies `/bucket/a%2Fb`, and no
+signature verifies a request whose decoded path differs from the one
+signed. That holds even when the raw path is not
 encoded as Go's `URL.EscapedPath` requires (`/b/a%2Fb{`): the raw path is
 used whenever it decodes to `URL.Path`. A raw path that does not decode to
 `URL.Path`, which only a middleware rewriting one without the other leaves,

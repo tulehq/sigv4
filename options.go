@@ -120,6 +120,14 @@ func WithMaxPresignExpiry(d time.Duration) Option {
 	return func(v *Verifier) { v.maxExpiry = d }
 }
 
+// WithS3PathEncoding signs the request path as S3 does, URI-encoded once.
+// Every other service encodes it twice, as SigV4 specifies and the SDK
+// signs it, which is the default; S3 is the one service the SDK signs with
+// DisableURIPathEscaping. An S3 service sets this.
+func WithS3PathEncoding() Option {
+	return func(v *Verifier) { v.s3Path = true }
+}
+
 // WithErrorMap sets the function every verification failure passes through,
 // so Verify, a streamed body's read and Close, and ReadBody return the
 // service's own wire error. Without it, or where it returns nil, they return

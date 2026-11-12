@@ -65,6 +65,7 @@ func mustNew(t *testing.T, keys KeySource, opts ...Option) *Verifier {
 func s3Options() []Option {
 	return []Option{
 		WithPresignedURLs(true),
+		WithS3PathEncoding(),
 		WithStreamedPayload(),
 		WithAnyPayloadHash(true),
 		WithRequiredSignedHeaders(),

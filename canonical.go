@@ -34,18 +34,22 @@ func signature(r *http.Request, s *signed, uri string) string {
 	return hex.EncodeToString(hmacSHA256(s.key.Signing, toSign))
 }
 
-// canonicalURI is the path as the client sent it, each segment decoded and
-// re-encoded. Segments are split on the slashes sent, not on the decoded
-// path's, so an encoded slash, %2F, stays part of its segment: a signature
-// over /bucket/a/b does not cover /bucket/a%2Fb, which a server may read as
-// another key.
+// canonicalURI is the path as the client sent it, URI-encoded once more for
+// every service but S3, as SigV4 specifies and the SDK signs: the path sent,
+// already encoded once by the client, has each byte outside the unreserved
+// set, '%' among them, encoded again. For S3, which signs the path encoded
+// once (s3 set), each segment is decoded and re-encoded instead.
+//
+// Either way an encoded slash, %2F, stays part of its segment, since the path
+// is taken as sent, not decoded: a signature over /bucket/a/b does not cover
+// /bucket/a%2Fb, which a server may read as another key.
 //
 // The path sent is RawPath whenever it is set and decodes to Path, even when
 // it is not encoded as URL.EscapedPath requires: for /b/a%2Fb{, EscapedPath
 // escapes the decoded Path instead, /b/a/b%7B, and would lose the encoded
 // slash. A RawPath that does not decode to Path, which only a middleware
 // rewriting one and not the other leaves, reports false.
-func canonicalURI(u *url.URL) (string, bool) {
+func canonicalURI(u *url.URL, s3 bool) (string, bool) {
 	p := u.EscapedPath()
 	if u.RawPath != "" {
 		if dec, err := url.PathUnescape(u.RawPath); err != nil || dec != u.Path {
@@ -55,6 +59,9 @@ func canonicalURI(u *url.URL) (string, bool) {
 	}
 	if p == "" {
 		return "/", true
+	}
+	if !s3 {
+		return uriEncode(p, false), true
 	}
 	segs := strings.Split(p, "/")
 	for i, seg := range segs {
