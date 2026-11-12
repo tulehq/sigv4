@@ -4,6 +4,7 @@ package sigv4
 // that used to verify and must not.
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -523,4 +524,56 @@ func TestDistinctSignedHeadersStayLinear(t *testing.T) {
 	if alloc := after.TotalAlloc - before.TotalAlloc; alloc > bound {
 		t.Fatalf("Verify allocated %d bytes, over %d", alloc, bound)
 	}
+}
+
+// serverRequest parses a request for target as net/http's server does,
+// with the headers of signed.
+func serverRequest(t *testing.T, target string, signed *http.Request) *http.Request {
+	t.Helper()
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "GET %s HTTP/1.1\r\nHost: %s\r\n", target, signed.Host)
+	for k, vs := range signed.Header {
+		for _, v := range vs {
+			fmt.Fprintf(&sb, "%s: %s\r\n", k, v)
+		}
+	}
+	sb.WriteString("\r\n")
+	r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(sb.String())))
+	if err != nil {
+		t.Fatalf("read request: %v", err)
+	}
+	return r
+}
+
+func TestEncodedSlashWithAnInvalidRawPath(t *testing.T) {
+	// "{" is not validly encoded, so for /b/a%2Fb{ URL.EscapedPath drops
+	// RawPath and escapes the decoded path, /b/a/b%7B, losing the encoded
+	// slash. A signature over /b/a/b%7B must not cover it.
+	signed := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"http://localhost:9000/b/a/b%7B", nil)
+	hash := sha256Hex("")
+	signed.Header.Set("X-Amz-Content-Sha256", hash)
+	err := s3Signer().SignHTTP(context.Background(), aws.Credentials{
+		AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey,
+	}, signed, hash, "s3", "eu-west-1", s3SignTime)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	if err = s3Verifier(t).check(serverRequest(t, "/b/a/b%7B", signed)); err != nil {
+		t.Fatalf("the signed path: %v", err)
+	}
+	for _, target := range []string{"/b/a%2Fb%7B", "/b/a%2Fb{"} {
+		r := serverRequest(t, target, signed)
+		if r.URL.Path != "/b/a/b{" {
+			t.Fatalf("%s parsed as %q", target, r.URL.Path)
+		}
+		wantKind(t, s3Verifier(t).check(r), KindSignatureMismatch)
+	}
+
+	// A RawPath that is not an encoding of Path, as a middleware rewriting
+	// one but not the other leaves it, is refused.
+	r := serverRequest(t, "/b/a%2Fb{", signed)
+	r.URL.Path = "/b/other"
+	wantKind(t, s3Verifier(t).check(r), KindIncompleteAuth)
 }

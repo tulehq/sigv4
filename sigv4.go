@@ -131,7 +131,12 @@ func (v *Verifier) verify(r *http.Request) (*signed, *Error) {
 		return nil, err
 	}
 
-	if !hmac.Equal([]byte(signature(r, s)), []byte(s.signature)) {
+	uri, ok := canonicalURI(r.URL)
+	if !ok {
+		return nil, newError(KindIncompleteAuth, s.presigned,
+			"The request path is not a consistent encoding of the path it names.")
+	}
+	if !hmac.Equal([]byte(signature(r, s, uri)), []byte(s.signature)) {
 		return nil, newError(KindSignatureMismatch, s.presigned, "The request signature we "+
 			"calculated does not match the signature you provided. Check your AWS Secret "+
 			"Access Key and signing method.")

@@ -11,11 +11,12 @@ import (
 	"strings"
 )
 
-// signature computes the signature r should carry for the claims in s.
-func signature(r *http.Request, s *signed) string {
+// signature computes the signature r should carry for the claims in s, with
+// uri its canonical URI.
+func signature(r *http.Request, s *signed, uri string) string {
 	creq := strings.Join([]string{
 		r.Method,
-		canonicalURI(r.URL),
+		uri,
 		canonicalQuery(r.URL.Query(), s.presigned),
 		canonicalHeaders(r, s.signedHeaders),
 		strings.Join(s.signedHeaders, ";"),
@@ -38,22 +39,34 @@ func signature(r *http.Request, s *signed) string {
 // path's, so an encoded slash, %2F, stays part of its segment: a signature
 // over /bucket/a/b does not cover /bucket/a%2Fb, which a server may read as
 // another key.
-func canonicalURI(u *url.URL) string {
+//
+// The path sent is RawPath whenever it is set and decodes to Path, even when
+// it is not encoded as URL.EscapedPath requires: for /b/a%2Fb{, EscapedPath
+// escapes the decoded Path instead, /b/a/b%7B, and would lose the encoded
+// slash. A RawPath that does not decode to Path, which only a middleware
+// rewriting one and not the other leaves, reports false.
+func canonicalURI(u *url.URL) (string, bool) {
 	p := u.EscapedPath()
+	if u.RawPath != "" {
+		if dec, err := url.PathUnescape(u.RawPath); err != nil || dec != u.Path {
+			return "", false
+		}
+		p = u.RawPath
+	}
 	if p == "" {
-		return "/"
+		return "/", true
 	}
 	segs := strings.Split(p, "/")
 	for i, seg := range segs {
 		dec, err := url.PathUnescape(seg)
 		if err != nil {
-			// EscapedPath is always validly escaped; were it not, encoding the
-			// segment as is gives a path no signer produced.
+			// The whole path decoded above, so a segment does; were it not,
+			// encoding it as is gives a path no signer produced.
 			dec = seg
 		}
 		segs[i] = uriEncode(dec, true)
 	}
-	return strings.Join(segs, "/")
+	return strings.Join(segs, "/"), true
 }
 
 // canonicalQuery URI-encodes the query's names and values and sorts it by

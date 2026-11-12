@@ -301,6 +301,19 @@ signed headers fails with `KindUnsignedHeader`. A header and parameter that
 disagree fail with `KindInvalidSessionToken`. The token then goes to the
 `KeySource` in `Scope.SessionToken`.
 
+## Paths
+
+The canonical URI is the path as the client sent it, split on the slashes
+sent and each segment decoded and re-encoded. An encoded slash (`%2F`) stays
+inside its segment, so a signature over `/bucket/a/b` never verifies
+`/bucket/a%2Fb`, and no signature verifies a request whose decoded path
+differs from the one signed. That holds even when the raw path is not
+encoded as Go's `URL.EscapedPath` requires (`/b/a%2Fb{`): the raw path is
+used whenever it decodes to `URL.Path`. A raw path that does not decode to
+`URL.Path`, which only a middleware rewriting one without the other leaves,
+is refused with `KindIncompleteAuth`. AWS's documentation does not say how
+it treats such paths, so this takes the fail-closed choice.
+
 ## Known behaviors kept as they were
 
 These come from the copies this library replaces and are kept so that no
