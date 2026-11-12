@@ -224,6 +224,15 @@ var s3Codes = map[Kind]s3Code{
 	}},
 	KindMissingPayloadHash:  {header: s3Bad("InvalidRequest")},
 	KindPayloadHashMismatch: {header: s3Bad("XAmzContentSHA256Mismatch")},
+	// S3 has no error for a body it cannot verify, since it accepts unsigned
+	// payloads; InvalidRequest is object-store's choice.
+	KindUnverifiedPayload: {header: s3Bad("InvalidRequest")},
+	// ReadBody reads small control documents, which S3 bounds with
+	// MaxMessageLengthExceeded.
+	KindBodyTooLarge: {header: wire{
+		status: http.StatusBadRequest, code: "MaxMessageLengthExceeded",
+		message: "Your request was too big.",
+	}},
 	KindRequestTimeTooSkewed: {header: wire{
 		status: http.StatusForbidden, code: "RequestTimeTooSkewed",
 		message: "The difference between the request time and the current time is too large.",

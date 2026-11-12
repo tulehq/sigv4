@@ -117,7 +117,11 @@ AWS JSON call that sends no `X-Amz-Content-Sha256`), or declared in hex and
 matched. A body sent under an opaque hash is covered by no hash, in either
 payload mode, even when the verifier accepts that hash (`UNSIGNED-PAYLOAD`,
 `STREAMING-*`, or any value under `WithAnyPayloadHash`). `ReadBody` refuses
-such a body with `KindUnverifiedPayload`.
+such a body with `KindUnverifiedPayload`. It also refuses a body a middleware
+wrapped after `Verify` (an `http.MaxBytesReader`, say), since it can no
+longer tell that body is verified. So `Verify` should sit innermost, after
+any middleware that wraps the body. `ReadBody`'s own limit stands in for a
+`MaxBytesReader`.
 
 `WithErrorMap` applies to these reads, `Close` and `ReadBody` too, so the
 handler gets the service's own error. `example_test.go` has both setups as
@@ -188,10 +192,10 @@ codes.
 | `KindExpiredSessionToken` | The `KeySource` reports the token expired | 400 `ExpiredToken` "The provided token has expired." (3) | 403 `ExpiredTokenException` "The security token included in the request is expired" (4) |
 | `KindCredentialDateMismatch` | Credential date is not the day of `X-Amz-Date` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
 | `KindBodyUnreadable` | Buffered payload, the body read failed | (streamed payload) | 400 `InvalidParameterException` / `InvalidInputException` |
-| `KindBodyTooLarge` | Buffered payload over the limit | (streamed payload) | 413 `InvalidParameterException` / `InvalidInputException` |
+| `KindBodyTooLarge` | Buffered payload over the limit, or a body over `ReadBody`'s limit | 400 `MaxMessageLengthExceeded` "Your request was too big." (5), from `ReadBody` | 413 `InvalidParameterException` / `InvalidInputException` |
 | `KindPayloadHashNotAccepted` | `X-Amz-Content-Sha256` not hex and not accepted | (any accepted) | 403 `IncompleteSignatureException` |
 | `KindPayloadHashMismatch` | Hex `X-Amz-Content-Sha256` does not match the body, or the body is longer or shorter than `Content-Length` | 400 `XAmzContentSHA256Mismatch`, on the body's read, `Close` or `ReadBody` | 400 `InvalidParameterException` / `InvalidInputException` |
-| `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers, or `Close` with more of a streamed body unread than it reads | the service's choice: refuse, or not use `ReadBody` for such a body | (buffered payload is always covered) |
+| `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers or that was wrapped after `Verify`, or `Close` with more of a streamed body unread than it reads | 400 `InvalidRequest` (6) | 400 `InvalidParameterException` / `InvalidInputException` (6) |
 | `KindSignatureMismatch` | The signature is wrong | 403 `SignatureDoesNotMatch` "The request signature we calculated does not match the signature you provided. Check your key and signing method." | 403 `InvalidSignatureException` |
 | `KindWrongService` | Credential scoped to another service than `WithService` | (not set) | (not set) |
 | `KindKeyLookupFailed` | The `KeySource` failed otherwise, or returned an empty key or a principal with no account ID | internal error | internal error |
@@ -207,6 +211,14 @@ Where each new S3 and token response comes from:
 3. The S3 error reference: `InvalidToken` and `ExpiredToken`, both 400.
 4. The text the SDKs report for `ExpiredTokenException`. The common-errors
    reference gives 403 and only a paraphrase of the message.
+5. The S3 error reference: `MaxMessageLengthExceeded`, 400, "Your request
+   was too big.", the error for an oversized request document. `ReadBody`
+   reads such documents (DeleteObjects, CompleteMultipartUpload); an object
+   upload over a limit would be `EntityTooLarge`, "Your proposed upload
+   exceeds the maximum allowed object size."
+6. No AWS counterpart: S3 accepts unsigned payloads and so has no error for
+   a body it cannot verify, and the JSON services always cover their body.
+   The codes shown are the services' choice.
 
 The JSON services use `InvalidParameterException` (Secrets Manager) or
 `InvalidInputException` (Organizations) where the table shows both. The

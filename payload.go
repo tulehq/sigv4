@@ -134,6 +134,12 @@ func (*bufferedBody) Close() error { return nil }
 // reader that stops at the end of its value, before the body's hash is
 // checked.
 //
+// It takes the body Verify set. A body a middleware wrapped after Verify,
+// such as an http.MaxBytesReader, can no longer be told verified and is
+// refused with KindUnverifiedPayload, so Verify should sit innermost, after
+// any middleware that wraps the body; ReadBody's own limit stands in for a
+// MaxBytesReader.
+//
 // It fails, through the WithErrorMap function, with KindBodyTooLarge for a
 // body over max, KindPayloadHashMismatch for one that does not match its
 // declared hash, and KindUnverifiedPayload for one no hash covers: a body

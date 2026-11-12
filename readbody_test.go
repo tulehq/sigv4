@@ -6,6 +6,7 @@ package sigv4
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -97,4 +98,32 @@ func declaredHex(svc jsonService) func(t *testing.T) *http.Request {
 			"X-Amz-Content-Sha256": hash,
 		})
 	}
+}
+
+func TestReadBodyWireErrors(t *testing.T) {
+	v := s3Verifier(t, WithErrorMap(s3Map))
+	orig, _ := deleteBodies()
+
+	r := s3Put(t, s3Target+"?delete", orig, nil)
+	if err := v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	_, err := v.ReadBody(r, 16)
+	wantWire(t, err, wire{
+		status: http.StatusBadRequest, code: "MaxMessageLengthExceeded",
+		message: "Your request was too big.",
+	})
+
+	// A body a middleware wrapped after Verify can no longer be told
+	// verified, so it is refused.
+	r = s3Put(t, s3Target+"?delete", orig, nil)
+	if err = v.check(r); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	r.Body = http.MaxBytesReader(httptest.NewRecorder(), r.Body, 1<<20)
+	_, err = v.ReadBody(r, 1<<20)
+	wantWire(t, err, wire{
+		status: http.StatusBadRequest, code: "InvalidRequest",
+		message: "The request body is not covered by the signature.",
+	})
 }
