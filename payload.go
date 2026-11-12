@@ -34,12 +34,16 @@ func (v *Verifier) bufferPayload(r *http.Request, s *signed) ([]byte, *Error) {
 		// the body's own hash goes into the canonical request, so a body that
 		// was changed in flight fails the signature.
 		s.payloadHash = bodyHash
+		s.bodyCovered = true
 	case !isHexSHA256(s.payloadHash):
+		// An accepted opaque hash is signed as sent; the body is not.
 		if err = v.checkOpaqueHash(s); err != nil {
 			return nil, err
 		}
 	case !strings.EqualFold(s.payloadHash, bodyHash):
 		return nil, newError(KindPayloadHashMismatch, s.presigned, hashMismatchText)
+	default:
+		s.bodyCovered = true
 	}
 	return body, nil
 }
@@ -95,7 +99,11 @@ func (v *Verifier) checkOpaqueHash(s *signed) *Error {
 func (v *Verifier) replaceBody(r *http.Request, s *signed, buffered []byte) {
 	switch {
 	case !v.streamed:
-		r.Body = &bufferedBody{Reader: bytes.NewReader(buffered), presigned: s.presigned}
+		r.Body = &bufferedBody{
+			Reader:    bytes.NewReader(buffered),
+			covered:   s.bodyCovered,
+			presigned: s.presigned,
+		}
 	case isHexSHA256(s.payloadHash) && r.Body != nil:
 		r.Body = &payloadVerifier{
 			body:      r.Body,
@@ -108,9 +116,12 @@ func (v *Verifier) replaceBody(r *http.Request, s *signed, buffered []byte) {
 	}
 }
 
-// bufferedBody is a buffered payload: the bytes the signature covered.
+// bufferedBody is a buffered payload. covered is set when the signature
+// covers its bytes, and not when they were sent under an opaque payload
+// hash, which signs no part of them.
 type bufferedBody struct {
 	*bytes.Reader
+	covered   bool
 	presigned bool
 }
 
@@ -125,15 +136,21 @@ func (*bufferedBody) Close() error { return nil }
 //
 // It fails, through the WithErrorMap function, with KindBodyTooLarge for a
 // body over max, KindPayloadHashMismatch for one that does not match its
-// declared hash, and KindUnverifiedPayload for one no hash covers, such as
-// an UNSIGNED-PAYLOAD body. A read error of the body itself is returned as
+// declared hash, and KindUnverifiedPayload for one no hash covers: a body
+// sent under UNSIGNED-PAYLOAD, a STREAMING-* value or any other opaque hash
+// the verifier accepts, in either payload mode. A read error of the body itself is returned as
 // is.
 func (v *Verifier) ReadBody(r *http.Request, maxBytes int64) ([]byte, error) {
 	var presigned bool
 	switch b := r.Body.(type) {
 	case *payloadVerifier:
+		// Wrapped only under a hex hash, which its reads check.
 		presigned = b.presigned
 	case *bufferedBody:
+		if !b.covered {
+			return nil, v.mapError(newError(KindUnverifiedPayload, b.presigned,
+				"The request body is not covered by the signature."))
+		}
 		presigned = b.presigned
 	default:
 		return nil, v.mapError(newError(KindUnverifiedPayload, false,

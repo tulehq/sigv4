@@ -100,9 +100,13 @@ must not act on them first. **A handler must read the body to
 `Content-Length` (or EOF), or use `ReadBody`, before acting on its
 bytes.** `v.ReadBody(r, max)` reads the whole body, up to `max` bytes, and
 returns it only once it is verified. It is meant for small control
-documents such as S3 DeleteObjects and CompleteMultipartUpload. It refuses
-a body that no hash covers (`UNSIGNED-PAYLOAD`, `STREAMING-*`) with
-`KindUnverifiedPayload`.
+documents such as S3 DeleteObjects and CompleteMultipartUpload. A body counts as
+verified only when the signature covers it: its hash was computed from it (an
+AWS JSON call that sends no `X-Amz-Content-Sha256`), or declared in hex and
+matched. A body sent under an opaque hash is covered by no hash, in either
+payload mode, even when the verifier accepts that hash (`UNSIGNED-PAYLOAD`,
+`STREAMING-*`, or any value under `WithAnyPayloadHash`). `ReadBody` refuses
+such a body with `KindUnverifiedPayload`.
 
 `WithErrorMap` applies to these reads, `Close` and `ReadBody` too, so the
 handler gets the service's own error. `example_test.go` has both setups as

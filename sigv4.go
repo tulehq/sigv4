@@ -92,6 +92,10 @@ type signed struct {
 	sessionToken  string
 	signedHeaders []string
 	presigned     bool
+	// bodyCovered is set when the signature covers the body: its hash was
+	// computed from it, or declared in hex and matched. A buffered body
+	// sent under an opaque hash is not covered.
+	bodyCovered bool
 }
 
 // Verify checks r's signature, returning the failure, passed through the
