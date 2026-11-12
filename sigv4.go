@@ -23,6 +23,7 @@
 package sigv4
 
 import (
+	"context"
 	"crypto/hmac"
 	"errors"
 	"net/http"
@@ -99,11 +100,24 @@ type signed struct {
 	bodyCovered bool
 }
 
+// scope returns the credential scope s was signed under, as the KeySource
+// is asked for it.
+func (s *signed) scope() Scope {
+	return Scope{
+		AccessKeyID:  s.cred.accessKeyID,
+		SessionToken: s.sessionToken,
+		Date:         s.cred.date,
+		Region:       s.cred.region,
+		Service:      s.cred.service,
+	}
+}
+
 // Verify checks r's signature, returning the failure, passed through the
 // WithErrorMap function when one is set.
 //
 // On success it returns the request to serve in r's place: r with a context
-// that carries the signer's Principal, read with PrincipalFrom. Its body,
+// that carries the signer's Principal, read with PrincipalFrom, and the
+// credential Scope the signature was verified under, read with ScopeFrom. Its body,
 // also set on r, is what the handler should read: with a buffered payload,
 // the bytes the signature covered; with a streamed one and a hex payload
 // hash, a reader that fails if the body does not match it.
@@ -112,7 +126,8 @@ func (v *Verifier) Verify(r *http.Request) (*http.Request, error) {
 	if e != nil {
 		return nil, v.mapError(e)
 	}
-	return r.WithContext(NewContext(r.Context(), s.key.Principal)), nil
+	ctx := NewContext(r.Context(), s.key.Principal)
+	return r.WithContext(context.WithValue(ctx, scopeKey{}, s.scope())), nil
 }
 
 func (v *Verifier) verify(r *http.Request) (*signed, *Error) {
@@ -374,13 +389,7 @@ func readSessionToken(r *http.Request, s *signed) *Error {
 // looked up before the credential's date is checked, so an unknown access
 // key is reported as such whatever else is wrong with the credential.
 func (v *Verifier) signingKey(r *http.Request, s *signed) (Key, *Error) {
-	key, err := v.keys.SigningKey(r.Context(), Scope{
-		AccessKeyID:  s.cred.accessKeyID,
-		SessionToken: s.sessionToken,
-		Date:         s.cred.date,
-		Region:       s.cred.region,
-		Service:      s.cred.service,
-	})
+	key, err := v.keys.SigningKey(r.Context(), s.scope())
 	if err != nil {
 		e := keyError(err, s.presigned)
 		e.Err = err

@@ -41,6 +41,7 @@ next.ServeHTTP(w, verified)
 
 // In a handler:
 p, ok := sigv4.PrincipalFrom(r.Context()) // p.AccountID, p.ARN, p.AccessKeyID
+s, ok := sigv4.ScopeFrom(r.Context())     // the verified credential scope: s.Service, s.Region, ...
 ```
 
 The principal comes back on the request rather than as a separate value. A

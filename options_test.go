@@ -436,6 +436,30 @@ func TestVerifyPutsThePrincipalInTheContext(t *testing.T) {
 	}
 }
 
+func TestVerifyPutsTheScopeInTheContext(t *testing.T) {
+	svc := jsonServices[0]
+	r := svc.signJSON(t, svc.body)
+	if _, ok := ScopeFrom(r.Context()); ok {
+		t.Fatal("an unverified request carries a scope")
+	}
+	got, err := jsonVerifier(t).Verify(r)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// The scope is the one the Authorization header's credential names.
+	_, cred, _ := strings.Cut(r.Header.Get("Authorization"), "Credential=")
+	cred, _, _ = strings.Cut(cred, ",")
+	parts := strings.Split(cred, "/")
+	if len(parts) != 5 {
+		t.Fatalf("credential = %q", cred)
+	}
+	want := Scope{AccessKeyID: parts[0], Date: parts[1], Region: parts[2], Service: parts[3]}
+	if s, ok := ScopeFrom(got.Context()); !ok || s != want {
+		t.Fatalf("scope = %+v, %v; want %+v", s, ok, want)
+	}
+}
+
 func TestErrorMapAppliesToStreamedBody(t *testing.T) {
 	r := s3SignedRequest(t, s3Target, s3AccessKey, s3SecretKey)
 	r.Body = io.NopCloser(strings.NewReader("tampered"))

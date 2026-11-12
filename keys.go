@@ -163,3 +163,15 @@ func PrincipalFrom(ctx context.Context) (Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(Principal)
 	return p, ok
 }
+
+type scopeKey struct{}
+
+// ScopeFrom returns the credential Scope the request ctx belongs to was
+// verified under, and false when ctx carries none: the request was not
+// verified. Unlike the Scope a KeySource is asked for, it is authenticated:
+// the signature covers the credential, so a service can route on its
+// Service and Region. It includes the session token, if any.
+func ScopeFrom(ctx context.Context) (Scope, bool) {
+	s, ok := ctx.Value(scopeKey{}).(Scope)
+	return s, ok
+}
