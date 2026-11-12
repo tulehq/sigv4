@@ -265,6 +265,15 @@ the access key ID. When it has no key it returns, or wraps:
 Any other error fails verification with `KindKeyLookupFailed`. The request's
 context is passed through. A `KeySource` must be safe for concurrent use.
 
+The scope is unauthenticated when `SigningKey` is called, because the
+signature is checked after it, with the key it returns. The access key ID,
+`Date`, `Region`, `Service` and `SessionToken` are whatever the request
+claims, and anyone can call `SigningKey` with any of them. An implementation
+must not cache per scope without a bound, since every request can name a
+new scope. It should not reveal more about a key or token than AWS does,
+so it should answer only through the sentinels, not through timing or
+other errors.
+
 `NewStaticKey(StaticKeyConfig{...})` knows one long-term access key, in any
 region and for any service, which is what each Tule service accepts today.
 It returns an error when the access key ID or secret is empty.

@@ -64,6 +64,15 @@ type Key struct {
 // ErrInvalidSessionToken and ErrExpiredSessionToken, or an error wrapping
 // one, when it has no key; any other error fails verification with
 // KindKeyLookupFailed. It must be safe for concurrent use.
+//
+// The scope is unauthenticated when SigningKey is called: the signature is
+// checked after, with the key it returns. So the access key ID, Date,
+// Region, Service and SessionToken are whatever the request claims, and
+// anyone can call SigningKey with any of them. An implementation must not
+// cache per scope without a bound, since each request can name a new one,
+// and should not reveal more about a token than AWS does: an error that
+// tells an unknown key from a known one, or a valid token from an invalid
+// one, through anything but these sentinels, lets a caller probe them.
 type KeySource interface {
 	SigningKey(ctx context.Context, scope Scope) (Key, error)
 }
