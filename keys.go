@@ -48,7 +48,8 @@ type Principal struct {
 // Key is what a KeySource hands the verifier for a scope.
 type Key struct {
 	// Principal is who the access key belongs to. Verify puts it in the
-	// request's context.
+	// request's context. Its AccountID must be set: a key without one fails
+	// verification with KindKeyLookupFailed.
 	Principal Principal
 	// Signing is the derived signing key; see DeriveSigningKey.
 	Signing []byte

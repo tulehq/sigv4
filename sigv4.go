@@ -380,7 +380,8 @@ func (v *Verifier) signingKey(r *http.Request, s *signed) (Key, *Error) {
 		e.Err = err
 		return Key{}, e
 	}
-	if len(key.Signing) == 0 {
+	if len(key.Signing) == 0 || key.Principal.AccountID == "" {
+		// A key with no principal account would verify a request as no one.
 		return Key{}, newError(KindKeyLookupFailed, s.presigned,
 			"The signing key could not be found.")
 	}

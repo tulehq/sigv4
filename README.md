@@ -191,7 +191,7 @@ codes.
 | `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers | the service's choice: refuse, or not use `ReadBody` for such a body | (buffered payload is always covered) |
 | `KindSignatureMismatch` | The signature is wrong | 403 `SignatureDoesNotMatch` "The request signature we calculated does not match the signature you provided. Check your key and signing method." | 403 `InvalidSignatureException` |
 | `KindWrongService` | Credential scoped to another service than `WithService` | (not set) | (not set) |
-| `KindKeyLookupFailed` | The `KeySource` failed otherwise, or returned an empty key | internal error | internal error |
+| `KindKeyLookupFailed` | The `KeySource` failed otherwise, or returned an empty key or a principal with no account ID | internal error | internal error |
 
 Where each new S3 and token response comes from:
 

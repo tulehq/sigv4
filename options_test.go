@@ -497,3 +497,17 @@ func TestStaticKeyRefusesAnEmptyKey(t *testing.T) {
 		}
 	}
 }
+
+func TestKeySourceWithoutAnAccountFails(t *testing.T) {
+	// A handler scopes data by the principal's account; a key that names
+	// none must not verify a request as if it did.
+	svc := jsonServices[0]
+	noAccount := keyFunc(func(_ context.Context, s Scope) (Key, error) {
+		return Key{
+			Principal: Principal{ARN: "arn:aws:iam::000000000000:root", AccessKeyID: s.AccessKeyID},
+			Signing:   DeriveSigningKey(testSecretKey, s.Date, s.Region, s.Service),
+		}, nil
+	})
+	v := mustNew(t, noAccount, append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
+	wantKind(t, v.check(svc.signJSON(t, svc.body)), KindKeyLookupFailed)
+}
