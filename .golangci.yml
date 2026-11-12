@@ -1,0 +1,114 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+
+linters:
+  enable:
+    # Bugs & correctness
+    - errcheck
+    - govet
+    - staticcheck
+    - bodyclose
+    - nilerr
+    - contextcheck
+
+    # Style & consistency
+    - revive
+    - misspell
+    - whitespace
+    - unconvert
+    - predeclared
+
+    # Complexity & maintainability
+    - gocyclo
+    - gocognit
+    - cyclop
+    - funlen
+    - nestif
+
+    # Performance
+    - prealloc
+    - gocritic
+
+    # Security
+    - gosec
+
+    # Error handling
+    - errorlint
+    - wrapcheck
+
+    # Architecture
+    - depguard
+
+    # Unused code
+    - unused
+    - unparam
+    - wastedassign
+
+  settings:
+    govet:
+      enable-all: true
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+
+    misspell:
+      locale: US
+
+    depguard:
+      rules:
+        # The library is stdlib only at runtime, so a service that imports it
+        # takes on no dependencies. The tests may use the AWS SDK signer.
+        runtime:
+          list-mode: strict
+          files:
+            - "!$test"
+          allow:
+            - $gostd
+
+  exclusions:
+    paths:
+      - vendor
+      - third_party
+      - testdata
+
+    rules:
+      # The fixtures are deliberately fake keys and the AWS documentation's
+      # example key, which G101 reads as real credentials.
+      - path: _test\.go
+        text: G101
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(tule.dev/sigv4)
+
+output:
+  sort-order:
+    - linter
+    - severity
+    - file
