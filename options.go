@@ -113,8 +113,8 @@ func WithMaxClockSkew(d time.Duration) Option {
 }
 
 // WithMaxPresignExpiry sets the longest X-Amz-Expires a presigned URL may
-// carry, a whole number of seconds, and the latest it may stay valid until,
-// counted from now, so dating a URL ahead does not extend it. The default is
+// carry, a whole number of seconds. With the skew a URL may be dated ahead
+// by, it bounds how long from now a URL can stay valid. The default is
 // DefaultMaxPresignExpiry.
 func WithMaxPresignExpiry(d time.Duration) Option {
 	return func(v *Verifier) { v.maxExpiry = d }

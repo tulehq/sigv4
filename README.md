@@ -105,7 +105,7 @@ compiled examples.
 | `WithRequiredSignedHeaders(names...)` | `host`, `x-amz-date` | Headers the signature must cover, checked in order. None means none. A presigned URL signs `X-Amz-Date` in its query, so `x-amz-date` is not required of one. |
 | `WithService(name)` | any | The service the credential must be scoped to. No Tule service checks this today. |
 | `WithMaxClockSkew(d)` | `DefaultMaxClockSkew` (15m) | How far `X-Amz-Date` may be from the clock on a header request, and how far ahead of it on a presigned URL. |
-| `WithMaxPresignExpiry(d)` | `DefaultMaxPresignExpiry` (7 days) | The longest `X-Amz-Expires`, in whole seconds, and the latest a presigned URL may stay valid until, counted from now. |
+| `WithMaxPresignExpiry(d)` | `DefaultMaxPresignExpiry` (7 days) | The longest `X-Amz-Expires`, in whole seconds. |
 | `WithErrorMap(f)` | none | Pass every failure through `f`, from `Verify` and from a streamed body's read. Without it they return the `*sigv4.Error`. |
 | `WithClock(now)` | `time.Now` | The clock request times are checked against. |
 
@@ -114,9 +114,10 @@ an expiry that is not a whole number of seconds.
 
 A presigned URL is valid from its `X-Amz-Date` for `X-Amz-Expires` seconds.
 It is refused as not yet valid when `X-Amz-Date` is more than the skew ahead
-of the clock. It is also refused when it would stay valid for longer than the
-maximum expiry from now, so dating a URL ahead cannot extend its life past
-seven days.
+of the clock, as S3 refuses it. A URL dated ahead within the skew is accepted,
+so a client whose clock runs a little fast still gets a working seven-day
+URL, and no URL stays valid for longer than the skew plus the maximum expiry
+from now.
 
 ## Errors
 
@@ -147,7 +148,7 @@ codes.
 | `KindRequestTimeTooSkewed` | `X-Amz-Date` beyond the skew | 403 `RequestTimeTooSkewed` "The difference between the request time and the current time is too large." | 403 `InvalidSignatureException` |
 | `KindInvalidExpires` | `X-Amz-Expires` not 0 to the maximum | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
 | `KindExpired` | Presigned URL past its expiry | 403 `AccessDenied` "Request has expired" | (presigned URLs off) |
-| `KindRequestNotYetValid` | Presigned URL dated beyond the skew, or valid past the maximum expiry from now | 403 `AccessDenied` "Request is not yet valid" (1) | (presigned URLs off) |
+| `KindRequestNotYetValid` | Presigned URL dated beyond the skew | 403 `AccessDenied` "Request is not yet valid" (1) | (presigned URLs off) |
 | `KindMissingPayloadHash` | Streamed payload, header request without `X-Amz-Content-Sha256` | 400 `InvalidRequest` | (buffered payload) |
 | `KindUnsignedHeader` | A required header, or `X-Amz-Security-Token`, is not signed | 403 `AccessDenied` "There were headers present in the request which were not signed" (2) | 403 `IncompleteSignatureException` |
 | `KindMalformedCredential` | Credential not `<key>/<date>/<region>/<service>/aws4_request` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |

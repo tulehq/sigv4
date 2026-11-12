@@ -1,8 +1,9 @@
 package sigv4
 
 // The window a presigned URL is valid in: it opens at X-Amz-Date, which may
-// not be ahead of the clock by more than the skew, and closes no later than
-// the maximum expiry from now, so dating a URL ahead cannot stretch its life.
+// not be ahead of the clock by more than the skew, as S3 allows, and lasts
+// X-Amz-Expires, at most the maximum expiry. A URL dated ahead cannot so
+// stay valid for longer than the skew plus the maximum expiry from now.
 
 import (
 	"context"
@@ -57,8 +58,15 @@ func TestPresignWindow(t *testing.T) {
 			want:    KindRequestNotYetValid,
 		},
 		{
-			// Within the skew, but the URL would outlive a week from now.
-			name: "ahead and valid a week", signed: time.Minute,
+			// A client whose clock runs a minute fast; S3 accepts it.
+			name: "a minute ahead and valid a week", signed: time.Minute, expires: week,
+		},
+		{
+			name: "ahead by the skew exactly and valid a week", signed: 15 * time.Minute,
+			expires: week,
+		},
+		{
+			name: "ahead beyond the skew and valid a week", signed: 15*time.Minute + time.Second,
 			expires: week, want: KindRequestNotYetValid,
 		},
 		{
@@ -93,9 +101,12 @@ func TestPresignWindowFollowsTheOptions(t *testing.T) {
 	if err := v.check(presignAt(t, now.Add(time.Minute), 30*time.Minute)); err != nil {
 		t.Fatalf("a minute ahead: %v", err)
 	}
+	if err := v.check(presignAt(t, now.Add(time.Minute), time.Hour)); err != nil {
+		t.Fatalf("a minute ahead, the longest expiry: %v", err)
+	}
 	wantKind(t, v.check(presignAt(t, now.Add(2*time.Minute), 30*time.Minute)),
 		KindRequestNotYetValid)
-	wantKind(t, v.check(presignAt(t, now.Add(time.Minute), time.Hour)), KindRequestNotYetValid)
+	wantKind(t, v.check(presignAt(t, now, time.Hour+time.Second)), KindInvalidExpires)
 }
 
 func TestPresignNotYetValidWire(t *testing.T) {

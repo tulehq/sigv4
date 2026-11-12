@@ -41,8 +41,7 @@ const (
 	KindExpired
 
 	// KindRequestNotYetValid: a presigned URL's X-Amz-Date is later than the
-	// server's clock plus the allowed skew, or it would stay valid for longer
-	// than the allowed expiry from now.
+	// server's clock plus the allowed skew.
 	KindRequestNotYetValid
 
 	// KindMissingPayloadHash: with a streamed payload, an Authorization

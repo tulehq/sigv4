@@ -223,11 +223,12 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 
 // checkPresignWindow refuses a presigned URL that is not valid now. Its
 // window opens at X-Amz-Date, which may be ahead of the server's clock by no
-// more than the allowed skew, and must close no later than the maximum
-// expiry from now, so dating a URL ahead cannot stretch its life.
+// more than the allowed skew, as S3 allows, and lasts X-Amz-Expires, which
+// is at most the maximum expiry. A URL is so valid for no longer than the
+// skew plus the maximum expiry from now, however it is dated.
 func (v *Verifier) checkPresignWindow(date time.Time, expires time.Duration) *Error {
 	now := v.now()
-	if date.After(now.Add(v.maxSkew)) || date.Add(expires).After(now.Add(v.maxExpiry)) {
+	if date.After(now.Add(v.maxSkew)) {
 		return newError(KindRequestNotYetValid, true, "Request is not yet valid")
 	}
 	if now.After(date.Add(expires)) {
