@@ -32,7 +32,7 @@ func streamed(t *testing.T, body io.Reader, length int64) *http.Request {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	if err = s3Verifier(t).Verify(r); err != nil {
+	if err = s3Verifier(t).check(r); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 	return r
@@ -161,7 +161,7 @@ func TestStreamedPayloadEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	if err = s3Verifier(t).Verify(r); err != nil {
+	if err = s3Verifier(t).check(r); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 	if got, err := io.ReadAll(r.Body); err != nil || len(got) != 0 {

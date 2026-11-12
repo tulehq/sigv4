@@ -40,7 +40,7 @@ func TestJSONVerifyAcceptsASignedRequest(t *testing.T) {
 	for _, svc := range jsonServices {
 		t.Run(svc.name, func(t *testing.T) {
 			req := svc.signJSON(t, svc.body)
-			if err := jsonVerifier(t).Verify(req); err != nil {
+			if err := jsonVerifier(t).check(req); err != nil {
 				t.Fatalf("Verify: %v", err)
 			}
 
@@ -134,7 +134,11 @@ func signatureRejectCases() []rejectCase {
 			name: "unknown access key",
 			verifier: func(t *testing.T) *Verifier {
 				t.Helper()
-				return mustNew(t, NewStaticKey("OTHER", testSecretKey),
+				return mustNew(
+					t,
+					NewStaticKey(
+						StaticKeyConfig{AccessKeyID: "OTHER", SecretAccessKey: testSecretKey},
+					),
 					append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
 			},
 			wantType: fixedType(typeUnrecognizedClient),
@@ -143,7 +147,11 @@ func signatureRejectCases() []rejectCase {
 			name: "wrong secret key",
 			verifier: func(t *testing.T) *Verifier {
 				t.Helper()
-				return mustNew(t, NewStaticKey(testAccessKey, "wrong"),
+				return mustNew(
+					t,
+					NewStaticKey(
+						StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: "wrong"},
+					),
 					append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
 			},
 			wantType: fixedType(typeInvalidSignature),
@@ -173,7 +181,7 @@ func TestJSONVerifyRejects(t *testing.T) {
 					verifier = tt.verifier(t)
 				}
 
-				wantJSONType(t, svc, verifier.Verify(req), tt.wantType(svc))
+				wantJSONType(t, svc, verifier.check(req), tt.wantType(svc))
 			})
 		}
 	}
@@ -185,7 +193,7 @@ func TestJSONVerifyRejectsAnOversizedBody(t *testing.T) {
 			req := svc.signJSON(t, "{}")
 			req.Body = io.NopCloser(strings.NewReader(strings.Repeat("a", DefaultMaxBodySize+1)))
 
-			w := wantJSONType(t, svc, jsonVerifier(t).Verify(req), svc.invalidInput)
+			w := wantJSONType(t, svc, jsonVerifier(t).check(req), svc.invalidInput)
 			if w.status != http.StatusRequestEntityTooLarge {
 				t.Fatalf("status = %d, want %d", w.status, http.StatusRequestEntityTooLarge)
 			}
@@ -207,7 +215,7 @@ func TestJSONVerifyRejectsAnUnsignedPayload(t *testing.T) {
 			})
 			req.Body = io.NopCloser(strings.NewReader(svc.otherBody))
 
-			wantJSONType(t, svc, jsonVerifier(t).Verify(req), typeIncompleteSig)
+			wantJSONType(t, svc, jsonVerifier(t).check(req), typeIncompleteSig)
 		})
 	}
 }
@@ -223,7 +231,7 @@ func TestJSONVerifyRequiresTheHeadersThatNameTheRequest(t *testing.T) {
 			})
 			req.Header.Set(targetHeader, svc.removeTarget)
 
-			wantJSONType(t, svc, jsonVerifier(t).Verify(req), typeIncompleteSig)
+			wantJSONType(t, svc, jsonVerifier(t).check(req), typeIncompleteSig)
 		})
 	}
 }

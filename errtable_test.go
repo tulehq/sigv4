@@ -313,7 +313,7 @@ func TestS3ErrorTable(t *testing.T) {
 func runRow(t *testing.T, v *Verifier, row tableRow) {
 	t.Helper()
 	r := row.request(t)
-	err := v.Verify(r)
+	err := v.check(r)
 	if row.readBody {
 		if err != nil {
 			t.Fatalf("Verify: %v", err)

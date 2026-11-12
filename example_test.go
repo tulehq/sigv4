@@ -41,7 +41,8 @@ func jsonError(e *sigv4.Error) error {
 // the error v's map made of it.
 func verifySignature(v *sigv4.Verifier, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := v.Verify(r); err != nil {
+		verified, err := v.Verify(r)
+		if err != nil {
 			var apiErr *apiError
 			if !errors.As(err, &apiErr) {
 				http.Error(w, "internal error", http.StatusInternalServerError)
@@ -50,7 +51,8 @@ func verifySignature(v *sigv4.Verifier, next http.Handler) http.Handler {
 			http.Error(w, apiErr.Message, apiErr.Status)
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Handlers read the signer with sigv4.PrincipalFrom(r.Context()).
+		next.ServeHTTP(w, verified)
 	})
 }
 
@@ -58,7 +60,11 @@ func verifySignature(v *sigv4.Verifier, next http.Handler) http.Handler {
 // signature must cover, since it names the operation.
 func ExampleNew_json() {
 	v, err := sigv4.New(
-		sigv4.NewStaticKey("AKIDEXAMPLE", "secret"),
+		sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+			AccessKeyID:     "AKIDEXAMPLE",
+			SecretAccessKey: "secret",
+			AccountID:       "000000000000",
+		}),
 		sigv4.WithRequiredSignedHeaders("host", "x-amz-date", "x-amz-target"),
 		sigv4.WithErrorMap(jsonError),
 	)
@@ -72,7 +78,11 @@ func ExampleNew_json() {
 // declared hash as the handler reads it, and any declared hash accepted.
 func ExampleNew_s3() {
 	v, err := sigv4.New(
-		sigv4.NewStaticKey("AKIDEXAMPLE", "secret"),
+		sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+			AccessKeyID:     "AKIDEXAMPLE",
+			SecretAccessKey: "secret",
+			AccountID:       "000000000000",
+		}),
 		sigv4.WithPresignedURLs(true),
 		sigv4.WithStreamedPayload(),
 		sigv4.WithAnyPayloadHash(true),

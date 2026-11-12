@@ -71,7 +71,7 @@ func TestPresignWindow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			r := presignAt(t, now.Add(tt.signed), tt.expires)
-			err := s3Verifier(t, WithClock(fixedClock(now))).Verify(r)
+			err := s3Verifier(t, WithClock(fixedClock(now))).check(r)
 			if tt.want == 0 {
 				if err != nil {
 					t.Fatalf("Verify: %v", err)
@@ -90,18 +90,18 @@ func TestPresignWindowFollowsTheOptions(t *testing.T) {
 	v := s3Verifier(t, WithClock(fixedClock(now)),
 		WithMaxClockSkew(time.Minute), WithMaxPresignExpiry(time.Hour))
 
-	if err := v.Verify(presignAt(t, now.Add(time.Minute), 30*time.Minute)); err != nil {
+	if err := v.check(presignAt(t, now.Add(time.Minute), 30*time.Minute)); err != nil {
 		t.Fatalf("a minute ahead: %v", err)
 	}
-	wantKind(t, v.Verify(presignAt(t, now.Add(2*time.Minute), 30*time.Minute)),
+	wantKind(t, v.check(presignAt(t, now.Add(2*time.Minute), 30*time.Minute)),
 		KindRequestNotYetValid)
-	wantKind(t, v.Verify(presignAt(t, now.Add(time.Minute), time.Hour)), KindRequestNotYetValid)
+	wantKind(t, v.check(presignAt(t, now.Add(time.Minute), time.Hour)), KindRequestNotYetValid)
 }
 
 func TestPresignNotYetValidWire(t *testing.T) {
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 	r := presignAt(t, now.Add(time.Hour), time.Hour)
-	err := s3Verifier(t, WithClock(fixedClock(now)), WithErrorMap(s3Map)).Verify(r)
+	err := s3Verifier(t, WithClock(fixedClock(now)), WithErrorMap(s3Map)).check(r)
 	wantWire(t, err, wire{
 		status: http.StatusForbidden, code: "AccessDenied", message: "Request is not yet valid",
 	})

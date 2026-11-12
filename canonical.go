@@ -30,7 +30,7 @@ func signature(r *http.Request, s *signed) string {
 		hex.EncodeToString(creqHash[:]),
 	}, "\n")
 
-	return hex.EncodeToString(hmacSHA256(s.key, toSign))
+	return hex.EncodeToString(hmacSHA256(s.key.Signing, toSign))
 }
 
 func canonicalURI(p string) string {

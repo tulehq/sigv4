@@ -49,8 +49,8 @@ const (
 	// header request carries no X-Amz-Content-Sha256 header.
 	KindMissingPayloadHash
 
-	// KindUnsignedHeader: the signature does not cover a header it must;
-	// Error.Header names it.
+	// KindUnsignedHeader: the signature does not cover a header it must, a
+	// required one or X-Amz-Security-Token; Error.Header names it.
 	KindUnsignedHeader
 
 	// KindMalformedCredential: the credential is not
@@ -60,6 +60,15 @@ const (
 	// KindUnknownAccessKey: the KeySource does not know the credential's
 	// access key ID.
 	KindUnknownAccessKey
+
+	// KindInvalidSessionToken: the KeySource refused the session token, the
+	// access key takes none, or the header and query parameter carry two
+	// different ones.
+	KindInvalidSessionToken
+
+	// KindExpiredSessionToken: the KeySource reports the session token
+	// expired.
+	KindExpiredSessionToken
 
 	// KindKeyLookupFailed: the KeySource failed for another reason, or
 	// returned an empty key; Error.Err holds its error, if any.
@@ -109,6 +118,8 @@ var kindNames = [...]string{
 	KindUnsignedHeader:         "UnsignedHeader",
 	KindMalformedCredential:    "MalformedCredential",
 	KindUnknownAccessKey:       "UnknownAccessKey",
+	KindInvalidSessionToken:    "InvalidSessionToken",
+	KindExpiredSessionToken:    "ExpiredSessionToken",
 	KindKeyLookupFailed:        "KeyLookupFailed",
 	KindCredentialDateMismatch: "CredentialDateMismatch",
 	KindWrongService:           "WrongService",
@@ -126,12 +137,13 @@ func (k Kind) String() string {
 	return "Kind(" + strconv.Itoa(int(k)) + ")"
 }
 
-// Error is a verification failure. Message is the text the Tule services
-// send for it today; where they phrase a condition differently, the service
-// substitutes its own (the README lists which).
+// Error is a verification failure. Message is the text the AWS JSON
+// services send for it; where S3 phrases a condition differently, the
+// service substitutes its own (the README lists which).
 type Error struct {
-	// Err is the underlying error, for KindKeyLookupFailed and
-	// KindBodyUnreadable. It is not meant for the client.
+	// Err is the underlying error: the KeySource's, for the Kinds it
+	// causes, and the read error, for KindBodyUnreadable. It is not meant
+	// for the client.
 	Err error
 
 	Message string

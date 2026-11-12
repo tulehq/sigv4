@@ -4,8 +4,10 @@
 // Verification is request-level: the signature over the method, path, query,
 // signed headers and payload hash is checked, in the Authorization header
 // and, when enabled, in presigned URLs. Signing keys come from a KeySource,
-// which hands out derived keys rather than secrets; NewStaticKey covers the
-// one access key a service accepts today.
+// which hands out derived keys rather than secrets and says who they belong
+// to; NewStaticKey covers the one access key a service accepts today. A
+// session token, X-Amz-Security-Token, must be covered by the signature and
+// is passed to the KeySource to validate.
 //
 // The payload is handled one of two ways. Buffered, the default, reads the
 // body up to a limit and hashes it, which suits the AWS JSON protocol: the
@@ -16,7 +18,8 @@
 //
 // A failure is an *Error: a Kind naming the condition and a message. A
 // service maps it to its own wire error, with WithErrorMap so a streamed
-// body's read fails with it too.
+// body's read fails with it too. On success, Verify returns the request to
+// serve, whose context carries the Principal that signed it.
 package sigv4
 
 import (
@@ -34,6 +37,7 @@ const (
 	amzDateFmt  = "20060102T150405Z"
 	dateFmt     = "20060102"
 	scopeSuffix = "aws4_request"
+	tokenHeader = "X-Amz-Security-Token" //nolint:gosec // G101: a header name, not a credential
 )
 
 // Verifier checks request signatures against the keys of a KeySource. It is
@@ -82,50 +86,55 @@ func New(keys KeySource, opts ...Option) (*Verifier, error) {
 type signed struct {
 	date          time.Time
 	cred          credential
+	key           Key
 	signature     string
 	payloadHash   string
-	key           []byte
+	sessionToken  string
 	signedHeaders []string
 	presigned     bool
 }
 
 // Verify checks r's signature, returning the failure, passed through the
-// WithErrorMap function when one is set. On success it replaces r.Body: with
-// a buffered payload, by the bytes the signature covered; with a streamed
-// one and a hex payload hash, by a reader that fails at EOF if the body does
-// not match it.
-func (v *Verifier) Verify(r *http.Request) error {
-	if e := v.verify(r); e != nil {
-		return v.mapError(e)
+// WithErrorMap function when one is set.
+//
+// On success it returns the request to serve in r's place: r with a context
+// that carries the signer's Principal, read with PrincipalFrom. Its body,
+// also set on r, is what the handler should read: with a buffered payload,
+// the bytes the signature covered; with a streamed one and a hex payload
+// hash, a reader that fails if the body does not match it.
+func (v *Verifier) Verify(r *http.Request) (*http.Request, error) {
+	s, e := v.verify(r)
+	if e != nil {
+		return nil, v.mapError(e)
 	}
-	return nil
+	return r.WithContext(NewContext(r.Context(), s.key.Principal)), nil
 }
 
-func (v *Verifier) verify(r *http.Request) *Error {
+func (v *Verifier) verify(r *http.Request) (*signed, *Error) {
 	s, err := v.parse(r)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var body []byte
 	if v.streamed {
 		if !isHexSHA256(s.payloadHash) {
 			if err = v.checkOpaqueHash(s); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	} else if body, err = v.bufferPayload(r, s); err != nil {
-		return err
+		return nil, err
 	}
 
 	if !hmac.Equal([]byte(signature(r, s)), []byte(s.signature)) {
-		return newError(KindSignatureMismatch, s.presigned, "The request signature we "+
+		return nil, newError(KindSignatureMismatch, s.presigned, "The request signature we "+
 			"calculated does not match the signature you provided. Check your AWS Secret "+
 			"Access Key and signing method.")
 	}
 
 	v.replaceBody(r, s, body)
-	return nil
+	return s, nil
 }
 
 func (v *Verifier) mapError(e *Error) error {
@@ -227,10 +236,13 @@ func (v *Verifier) checkPresignWindow(date time.Time, expires time.Duration) *Er
 	return nil
 }
 
-// finishParse checks the signed headers and the credential, and looks up the
-// signing key it names.
+// finishParse checks the signed headers, the session token and the
+// credential, and looks up the signing key the credential names.
 func (v *Verifier) finishParse(r *http.Request, s *signed, cred string) (*signed, *Error) {
 	if err := v.requireSignedHeaders(s); err != nil {
+		return nil, err
+	}
+	if err := readSessionToken(r, s); err != nil {
 		return nil, err
 	}
 
@@ -268,14 +280,44 @@ func (v *Verifier) requireSignedHeaders(s *signed) *Error {
 			// A presigned URL signs X-Amz-Date in its query.
 			continue
 		}
-		if !slices.ContainsFunc(s.signedHeaders, func(got string) bool {
-			return strings.EqualFold(strings.TrimSpace(got), want)
-		}) {
-			e := newError(KindUnsignedHeader, s.presigned,
-				"The request signature must cover the "+want+" header.")
-			e.Header = want
-			return e
+		if !signsHeader(s, want) {
+			return unsignedHeader(s, want)
 		}
+	}
+	return nil
+}
+
+func signsHeader(s *signed, name string) bool {
+	return slices.ContainsFunc(s.signedHeaders, func(got string) bool {
+		return strings.EqualFold(strings.TrimSpace(got), name)
+	})
+}
+
+func unsignedHeader(s *signed, name string) *Error {
+	e := newError(KindUnsignedHeader, s.presigned,
+		"The request signature must cover the "+name+" header.")
+	e.Header = name
+	return e
+}
+
+// readSessionToken takes the session token from the X-Amz-Security-Token
+// header or query parameter, as the SDK signer sends it: a header on a
+// signed request, a parameter of a presigned URL. A parameter is part of the
+// canonical query, so always signed; a header must be among the signed
+// headers, or whoever relays the request could attach another token.
+func readSessionToken(r *http.Request, s *signed) *Error {
+	header := r.Header.Get(tokenHeader)
+	param := r.URL.Query().Get(tokenHeader)
+	if header != "" && !signsHeader(s, strings.ToLower(tokenHeader)) {
+		return unsignedHeader(s, strings.ToLower(tokenHeader))
+	}
+	if header != "" && param != "" && header != param {
+		return newError(KindInvalidSessionToken, s.presigned,
+			"The security token included in the request is invalid.")
+	}
+	s.sessionToken = header
+	if s.sessionToken == "" {
+		s.sessionToken = param
 	}
 	return nil
 }
@@ -283,26 +325,39 @@ func (v *Verifier) requireSignedHeaders(s *signed) *Error {
 // signingKey asks the KeySource for the key s's credential signs with. It is
 // looked up before the credential's date is checked, so an unknown access
 // key is reported as such whatever else is wrong with the credential.
-func (v *Verifier) signingKey(r *http.Request, s *signed) ([]byte, *Error) {
+func (v *Verifier) signingKey(r *http.Request, s *signed) (Key, *Error) {
 	key, err := v.keys.SigningKey(r.Context(), Scope{
-		AccessKeyID: s.cred.accessKeyID,
-		Date:        s.cred.date,
-		Region:      s.cred.region,
-		Service:     s.cred.service,
+		AccessKeyID:  s.cred.accessKeyID,
+		SessionToken: s.sessionToken,
+		Date:         s.cred.date,
+		Region:       s.cred.region,
+		Service:      s.cred.service,
 	})
-	switch {
-	case errors.Is(err, ErrUnknownAccessKey):
-		e := newError(KindUnknownAccessKey, s.presigned,
-			"The security token included in the request is invalid.")
+	if err != nil {
+		e := keyError(err, s.presigned)
 		e.Err = err
-		return nil, e
-	case err != nil:
-		e := newError(KindKeyLookupFailed, s.presigned, "The signing key could not be found.")
-		e.Err = err
-		return nil, e
-	case len(key) == 0:
-		return nil, newError(KindKeyLookupFailed, s.presigned,
+		return Key{}, e
+	}
+	if len(key.Signing) == 0 {
+		return Key{}, newError(KindKeyLookupFailed, s.presigned,
 			"The signing key could not be found.")
 	}
 	return key, nil
+}
+
+// keyError is the verification failure a KeySource error stands for.
+func keyError(err error, presigned bool) *Error {
+	switch {
+	case errors.Is(err, ErrUnknownAccessKey):
+		return newError(KindUnknownAccessKey, presigned,
+			"The security token included in the request is invalid.")
+	case errors.Is(err, ErrInvalidSessionToken):
+		return newError(KindInvalidSessionToken, presigned,
+			"The security token included in the request is invalid.")
+	case errors.Is(err, ErrExpiredSessionToken):
+		return newError(KindExpiredSessionToken, presigned,
+			"The security token included in the request is expired")
+	default:
+		return newError(KindKeyLookupFailed, presigned, "The signing key could not be found.")
+	}
 }

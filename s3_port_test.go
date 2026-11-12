@@ -29,7 +29,10 @@ var s3SignTime = time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 func s3Verifier(t *testing.T, opts ...Option) *Verifier {
 	t.Helper()
 	all := append(s3Options(), WithClock(fixedClock(s3SignTime.Add(time.Minute))))
-	return mustNew(t, NewStaticKey(s3AccessKey, s3SecretKey), append(all, opts...)...)
+	return mustNew(
+		t,
+		NewStaticKey(StaticKeyConfig{AccessKeyID: s3AccessKey, SecretAccessKey: s3SecretKey}),
+		append(all, opts...)...)
 }
 
 // s3Signer signs the way the S3 client signs: without re-escaping the path.
@@ -76,7 +79,7 @@ func s3PresignedRequest(t *testing.T, target string, expires time.Duration) *htt
 func TestS3VerifyHeader(t *testing.T) {
 	const target = "http://localhost:9000/bucket/dir/sub%20dir/file%3D%2B%26%40%21.txt?uploads="
 	r := s3SignedRequest(t, target, s3AccessKey, s3SecretKey)
-	if err := s3Verifier(t).Verify(r); err != nil {
+	if err := s3Verifier(t).check(r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	got, err := io.ReadAll(r.Body)
@@ -90,23 +93,23 @@ func TestS3VerifyHeaderFailures(t *testing.T) {
 
 	r := s3SignedRequest(t, target, s3AccessKey, s3SecretKey)
 	r.URL.Path = "/bucket/other"
-	wantKind(t, s3Verifier(t).Verify(r), KindSignatureMismatch)
+	wantKind(t, s3Verifier(t).check(r), KindSignatureMismatch)
 
 	r = s3SignedRequest(t, target, s3AccessKey, "wrong")
-	wantKind(t, s3Verifier(t).Verify(r), KindSignatureMismatch)
+	wantKind(t, s3Verifier(t).check(r), KindSignatureMismatch)
 
 	r = s3SignedRequest(t, target, "OTHER", s3SecretKey)
-	wantKind(t, s3Verifier(t).Verify(r), KindUnknownAccessKey)
+	wantKind(t, s3Verifier(t).check(r), KindUnknownAccessKey)
 
 	r = s3SignedRequest(t, target, s3AccessKey, s3SecretKey)
 	v := s3Verifier(t, WithClock(fixedClock(s3SignTime.Add(time.Hour))))
-	wantKind(t, v.Verify(r), KindRequestTimeTooSkewed)
+	wantKind(t, v.check(r), KindRequestTimeTooSkewed)
 
 	r = httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
-	wantKind(t, s3Verifier(t).Verify(r), KindMissingAuth)
+	wantKind(t, s3Verifier(t).check(r), KindMissingAuth)
 
 	r.Header.Set("Authorization", "AWS AKID:abc")
-	wantKind(t, s3Verifier(t).Verify(r), KindUnsupportedAlgorithm)
+	wantKind(t, s3Verifier(t).check(r), KindUnsupportedAlgorithm)
 }
 
 func TestS3VerifyPayloadMismatch(t *testing.T) {
@@ -114,7 +117,7 @@ func TestS3VerifyPayloadMismatch(t *testing.T) {
 	// The signature covers the declared hash, not the body, so a body swapped
 	// in flight passes Verify and fails the read that reaches its end.
 	r.Body = io.NopCloser(strings.NewReader("tampered"))
-	if err := s3Verifier(t).Verify(r); err != nil {
+	if err := s3Verifier(t).check(r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	_, err := io.ReadAll(r.Body)
@@ -125,14 +128,14 @@ func TestS3VerifyPresigned(t *testing.T) {
 	const target = "http://localhost:9000/bucket/up/loaded%20file.txt"
 
 	r := s3PresignedRequest(t, target, time.Hour)
-	if err := s3Verifier(t).Verify(r); err != nil {
+	if err := s3Verifier(t).check(r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 
 	r = s3PresignedRequest(t, target, 30*time.Second)
-	wantKind(t, s3Verifier(t).Verify(r), KindExpired)
+	wantKind(t, s3Verifier(t).check(r), KindExpired)
 
 	r = s3PresignedRequest(t, target, time.Hour)
 	r.Method = http.MethodPut
-	wantKind(t, s3Verifier(t).Verify(r), KindSignatureMismatch)
+	wantKind(t, s3Verifier(t).check(r), KindSignatureMismatch)
 }

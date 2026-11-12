@@ -88,7 +88,10 @@ func (svc sdkService) verifier(t *testing.T, opts ...Option) *Verifier {
 	t.Helper()
 	clock := WithClock(fixedClock(sdkTime.Add(time.Minute)))
 	all := slices.Concat(svc.opts, []Option{clock}, opts)
-	return mustNew(t, NewStaticKey(sdkAccessKey, sdkSecretKey), all...)
+	return mustNew(
+		t,
+		NewStaticKey(StaticKeyConfig{AccessKeyID: sdkAccessKey, SecretAccessKey: sdkSecretKey}),
+		all...)
 }
 
 func (svc sdkService) newRequest(target string) *http.Request {
@@ -109,12 +112,21 @@ func (svc sdkService) newRequest(target string) *http.Request {
 func (svc sdkService) sign(t *testing.T, presign bool, accessKey, secretKey string) *http.Request {
 	t.Helper()
 	creds := aws.Credentials{AccessKeyID: accessKey, SecretAccessKey: secretKey}
+	return svc.signAt(t, presign, creds, sdkTime)
+}
+
+// signAt returns svc's request signed with creds at signTime, by SignHTTP or
+// by PresignHTTP, as the server receives it.
+func (svc sdkService) signAt(
+	t *testing.T, presign bool, creds aws.Credentials, signTime time.Time,
+) *http.Request {
+	t.Helper()
 	r := svc.newRequest(svc.target)
 	hash := sha256Hex(svc.body)
 
 	if !presign {
 		err := svc.signer(false).SignHTTP(
-			context.Background(), creds, r, hash, svc.name, sdkRegion, sdkTime,
+			context.Background(), creds, r, hash, svc.name, sdkRegion, signTime,
 		)
 		if err != nil {
 			t.Fatalf("sign: %v", err)
@@ -128,7 +140,7 @@ func (svc sdkService) sign(t *testing.T, presign bool, accessKey, secretKey stri
 	r.URL.RawQuery = q.Encode()
 
 	signedURL, headers, err := svc.signer(true).PresignHTTP(
-		context.Background(), creds, r, hash, svc.name, sdkRegion, sdkTime,
+		context.Background(), creds, r, hash, svc.name, sdkRegion, signTime,
 	)
 	if err != nil {
 		t.Fatalf("presign: %v", err)
@@ -206,7 +218,7 @@ func TestSDKSignedRequestsVerify(t *testing.T) {
 		for _, presign := range []bool{false, true} {
 			t.Run(svc.name+"/"+modeName(presign), func(t *testing.T) {
 				r := svc.sign(t, presign, sdkAccessKey, sdkSecretKey)
-				if err := svc.verifier(t, WithService(svc.name)).Verify(r); err != nil {
+				if err := svc.verifier(t, WithService(svc.name)).check(r); err != nil {
 					t.Fatalf("Verify: %v", err)
 				}
 				got, err := io.ReadAll(r.Body)
@@ -225,7 +237,7 @@ func TestSDKSignedRequestsTampered(t *testing.T) {
 				t.Run(svc.name+"/"+modeName(presign)+"/"+tamper.name, func(t *testing.T) {
 					r := svc.sign(t, presign, sdkAccessKey, sdkSecretKey)
 					tamper.apply(svc, r)
-					wantKind(t, svc.verifier(t).Verify(r), KindSignatureMismatch)
+					wantKind(t, svc.verifier(t).check(r), KindSignatureMismatch)
 				})
 			}
 		}
@@ -238,7 +250,7 @@ func TestSDKSignedRequestsTamperedBody(t *testing.T) {
 			t.Run(svc.name+"/"+modeName(presign), func(t *testing.T) {
 				r := svc.sign(t, presign, sdkAccessKey, sdkSecretKey)
 				r.Body = io.NopCloser(strings.NewReader(svc.body + " and more"))
-				err := svc.verifier(t).Verify(r)
+				err := svc.verifier(t).check(r)
 
 				if !svc.sendHash {
 					// The body's own hash is signed, so the signature fails.
@@ -261,11 +273,11 @@ func TestSDKSignedRequestsWrongKey(t *testing.T) {
 		for _, presign := range []bool{false, true} {
 			t.Run(svc.name+"/"+modeName(presign)+"/secret", func(t *testing.T) {
 				r := svc.sign(t, presign, sdkAccessKey, "not the secret")
-				wantKind(t, svc.verifier(t).Verify(r), KindSignatureMismatch)
+				wantKind(t, svc.verifier(t).check(r), KindSignatureMismatch)
 			})
 			t.Run(svc.name+"/"+modeName(presign)+"/access key", func(t *testing.T) {
 				r := svc.sign(t, presign, "AKIDOTHER", sdkSecretKey)
-				wantKind(t, svc.verifier(t).Verify(r), KindUnknownAccessKey)
+				wantKind(t, svc.verifier(t).check(r), KindUnknownAccessKey)
 			})
 		}
 	}
@@ -280,12 +292,12 @@ func TestSDKSignedRequestsWrongService(t *testing.T) {
 				other := svc
 				other.name = "iam"
 				r := other.sign(t, presign, sdkAccessKey, sdkSecretKey)
-				if err := svc.verifier(t).Verify(r); err != nil {
+				if err := svc.verifier(t).check(r); err != nil {
 					t.Fatalf("Verify without WithService: %v", err)
 				}
 
 				r = other.sign(t, presign, sdkAccessKey, sdkSecretKey)
-				e := asKind(t, svc.verifier(t, WithService(svc.name)).Verify(r), KindWrongService)
+				e := asKind(t, svc.verifier(t, WithService(svc.name)).check(r), KindWrongService)
 				if e.Presigned != presign {
 					t.Fatalf("Presigned = %v, want %v", e.Presigned, presign)
 				}
@@ -303,5 +315,5 @@ func TestSDKPresignedURLsAreOffByDefault(t *testing.T) {
 	if _, err := url.ParseQuery(r.URL.RawQuery); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	wantKind(t, svc.verifier(t).Verify(r), KindMissingAuth)
+	wantKind(t, svc.verifier(t).check(r), KindMissingAuth)
 }

@@ -36,6 +36,12 @@ func fixedClock(t time.Time) func() time.Time {
 	return func() time.Time { return t }
 }
 
+// check verifies r, keeping only the error, for the tests that need no more.
+func (v *Verifier) check(r *http.Request) error {
+	_, err := v.Verify(r)
+	return err
+}
+
 func mustNew(t *testing.T, keys KeySource, opts ...Option) *Verifier {
 	t.Helper()
 	v, err := New(keys, opts...)
@@ -96,7 +102,10 @@ var jsonServices = []jsonService{
 func jsonVerifier(t *testing.T, opts ...Option) *Verifier {
 	t.Helper()
 	all := append(jsonOptions(), WithClock(fixedClock(signedAt)))
-	return mustNew(t, NewStaticKey(testAccessKey, testSecretKey), append(all, opts...)...)
+	return mustNew(
+		t,
+		NewStaticKey(StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey}),
+		append(all, opts...)...)
 }
 
 // signJSON builds a request signed the way the AWS SDK signs an AWS JSON
@@ -191,8 +200,20 @@ var s3Codes = map[Kind]s3Code{
 	KindInvalidExpires:         {header: queryMalformed},
 	KindExpired:                {header: s3Forbidden("AccessDenied")},
 	KindRequestNotYetValid:     {header: s3Forbidden("AccessDenied")},
-	KindMissingPayloadHash:     {header: s3Bad("InvalidRequest")},
-	KindPayloadHashMismatch:    {header: s3Bad("XAmzContentSHA256Mismatch")},
+	KindUnsignedHeader: {header: wire{
+		status: http.StatusForbidden, code: "AccessDenied",
+		message: "There were headers present in the request which were not signed",
+	}},
+	KindInvalidSessionToken: {header: wire{
+		status: http.StatusBadRequest, code: "InvalidToken",
+		message: "The provided token is malformed or otherwise invalid.",
+	}},
+	KindExpiredSessionToken: {header: wire{
+		status: http.StatusBadRequest, code: "ExpiredToken",
+		message: "The provided token has expired.",
+	}},
+	KindMissingPayloadHash:  {header: s3Bad("InvalidRequest")},
+	KindPayloadHashMismatch: {header: s3Bad("XAmzContentSHA256Mismatch")},
 	KindRequestTimeTooSkewed: {header: wire{
 		status: http.StatusForbidden, code: "RequestTimeTooSkewed",
 		message: "The difference between the request time and the current time is too large.",
@@ -249,10 +270,12 @@ func jsonWire(e *Error, invalidInput string) wire {
 		return wire{
 			status: http.StatusForbidden, code: "InvalidSignatureException", message: e.Message,
 		}
-	case KindUnknownAccessKey:
+	case KindUnknownAccessKey, KindInvalidSessionToken:
 		return wire{
 			status: http.StatusForbidden, code: "UnrecognizedClientException", message: e.Message,
 		}
+	case KindExpiredSessionToken:
+		return wire{status: http.StatusForbidden, code: "ExpiredTokenException", message: e.Message}
 	case KindPayloadHashMismatch, KindBodyUnreadable:
 		return wire{status: http.StatusBadRequest, code: invalidInput, message: e.Message}
 	case KindBodyTooLarge:
