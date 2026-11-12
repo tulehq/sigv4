@@ -190,6 +190,7 @@ var s3Codes = map[Kind]s3Code{
 	KindInvalidDate:            {header: s3Forbidden("AccessDenied"), query: queryMalformed},
 	KindInvalidExpires:         {header: queryMalformed},
 	KindExpired:                {header: s3Forbidden("AccessDenied")},
+	KindRequestNotYetValid:     {header: s3Forbidden("AccessDenied")},
 	KindMissingPayloadHash:     {header: s3Bad("InvalidRequest")},
 	KindPayloadHashMismatch:    {header: s3Bad("XAmzContentSHA256Mismatch")},
 	KindRequestTimeTooSkewed: {header: wire{

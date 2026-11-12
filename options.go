@@ -14,7 +14,8 @@ const (
 	DefaultMaxBodySize = 1 << 20
 
 	// DefaultMaxClockSkew is how far X-Amz-Date may be from the server's
-	// clock, either way, on an Authorization header request.
+	// clock, either way, on an Authorization header request, and how far
+	// ahead of it on a presigned URL.
 	DefaultMaxClockSkew = 15 * time.Minute
 
 	// DefaultMaxPresignExpiry is the longest X-Amz-Expires a presigned URL
@@ -104,14 +105,17 @@ func WithService(name string) Option {
 }
 
 // WithMaxClockSkew sets how far X-Amz-Date may be from the server's clock on
-// an Authorization header request. A presigned URL is bounded by its expiry
-// instead. The default is DefaultMaxClockSkew.
+// an Authorization header request, either way, and how far ahead of it a
+// presigned URL's X-Amz-Date may be; a presigned URL's age is bounded by its
+// expiry instead. The default is DefaultMaxClockSkew.
 func WithMaxClockSkew(d time.Duration) Option {
 	return func(v *Verifier) { v.maxSkew = d }
 }
 
 // WithMaxPresignExpiry sets the longest X-Amz-Expires a presigned URL may
-// carry, a whole number of seconds. The default is DefaultMaxPresignExpiry.
+// carry, a whole number of seconds, and the latest it may stay valid until,
+// counted from now, so dating a URL ahead does not extend it. The default is
+// DefaultMaxPresignExpiry.
 func WithMaxPresignExpiry(d time.Duration) Option {
 	return func(v *Verifier) { v.maxExpiry = d }
 }

@@ -195,8 +195,8 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 		return nil, newError(KindInvalidExpires, true, "X-Amz-Expires must be a number of "+
 			"seconds between 0 and "+strconv.Itoa(maxExpires))
 	}
-	if v.now().After(date.Add(time.Duration(expires) * time.Second)) {
-		return nil, newError(KindExpired, true, "Request has expired")
+	if e := v.checkPresignWindow(date, time.Duration(expires)*time.Second); e != nil {
+		return nil, e
 	}
 
 	s := &signed{
@@ -210,6 +210,21 @@ func (v *Verifier) parsePresigned(r *http.Request) (*signed, *Error) {
 		s.payloadHash = unsignedPayload
 	}
 	return v.finishParse(r, s, q.Get("X-Amz-Credential"))
+}
+
+// checkPresignWindow refuses a presigned URL that is not valid now. Its
+// window opens at X-Amz-Date, which may be ahead of the server's clock by no
+// more than the allowed skew, and must close no later than the maximum
+// expiry from now, so dating a URL ahead cannot stretch its life.
+func (v *Verifier) checkPresignWindow(date time.Time, expires time.Duration) *Error {
+	now := v.now()
+	if date.After(now.Add(v.maxSkew)) || date.Add(expires).After(now.Add(v.maxExpiry)) {
+		return newError(KindRequestNotYetValid, true, "Request is not yet valid")
+	}
+	if now.After(date.Add(expires)) {
+		return newError(KindExpired, true, "Request has expired")
+	}
+	return nil
 }
 
 // finishParse checks the signed headers and the credential, and looks up the

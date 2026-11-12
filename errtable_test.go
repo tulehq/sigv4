@@ -255,6 +255,15 @@ func s3PresignCredentialRows() []tableRow {
 	const aqpe = "AuthorizationQueryParametersError"
 	return []tableRow{
 		{
+			name:    "presign dated ahead of the clock",
+			request: s3Presigned,
+			opts:    []Option{WithClock(fixedClock(s3SignTime.Add(-time.Hour)))},
+			want: wire{
+				status: http.StatusForbidden, code: "AccessDenied",
+				message: "Request is not yet valid",
+			},
+		},
+		{
 			name: "presign malformed credential",
 			request: withQuery(s3Presigned, "X-Amz-Credential",
 				"AKID/20261015/us-east-1/s3"),

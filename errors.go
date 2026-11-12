@@ -40,6 +40,11 @@ const (
 	// KindExpired: a presigned URL is past its X-Amz-Date plus X-Amz-Expires.
 	KindExpired
 
+	// KindRequestNotYetValid: a presigned URL's X-Amz-Date is later than the
+	// server's clock plus the allowed skew, or it would stay valid for longer
+	// than the allowed expiry from now.
+	KindRequestNotYetValid
+
 	// KindMissingPayloadHash: with a streamed payload, an Authorization
 	// header request carries no X-Amz-Content-Sha256 header.
 	KindMissingPayloadHash
@@ -99,6 +104,7 @@ var kindNames = [...]string{
 	KindRequestTimeTooSkewed:   "RequestTimeTooSkewed",
 	KindInvalidExpires:         "InvalidExpires",
 	KindExpired:                "Expired",
+	KindRequestNotYetValid:     "RequestNotYetValid",
 	KindMissingPayloadHash:     "MissingPayloadHash",
 	KindUnsignedHeader:         "UnsignedHeader",
 	KindMalformedCredential:    "MalformedCredential",
