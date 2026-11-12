@@ -443,3 +443,25 @@ func TestPresignExpiresZeroIsRefused(t *testing.T) {
 		wantKind(t, err, KindSignatureMismatch) // the URL was signed for an hour
 	}
 }
+
+func TestHeaderValuesAreCollapsedAsTheSDKDoes(t *testing.T) {
+	// The SDK collapses runs of spaces, not other whitespace, then trims.
+	for _, value := range []string{"a\tb", "a \t b", "\ta  b\t", "a   b", " a "} {
+		t.Run(value, func(t *testing.T) {
+			r := s3Put(t, s3Target, s3Body, map[string]string{"X-Amz-Meta-Note": value})
+			if err := s3Verifier(t).check(r); err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+		})
+	}
+}
+
+func TestCanonicalValue(t *testing.T) {
+	for in, want := range map[string]string{
+		"a\tb": "a\tb", "a  b": "a b", "  a  ": "a", "\ta\t": "a", "a \t  b": "a \t b", "": "",
+	} {
+		if got := canonicalValue(in); got != want {
+			t.Fatalf("canonicalValue(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -75,8 +75,8 @@ func canonicalQuery(q url.Values, presigned bool) string {
 	return sb.String()
 }
 
-// canonicalHeaders lists the signed headers as "name:value\n" lines, with
-// values trimmed and inner runs of spaces collapsed.
+// canonicalHeaders lists the signed headers as "name:value\n" lines, each
+// value as canonicalValue makes it.
 //
 // The values are collapsed in place, in r.Header itself, so the handler sees
 // a signed header as it was signed. Every copy this package replaces did
@@ -94,7 +94,7 @@ func canonicalHeaders(r *http.Request, names []string) string {
 			val = strconv.FormatInt(r.ContentLength, 10)
 		default:
 			for i, x := range vals {
-				vals[i] = strings.Join(strings.Fields(x), " ")
+				vals[i] = canonicalValue(x)
 			}
 			val = strings.Join(vals, ",")
 		}
@@ -104,6 +104,21 @@ func canonicalHeaders(r *http.Request, names []string) string {
 		sb.WriteByte('\n')
 	}
 	return sb.String()
+}
+
+// canonicalValue is a header value as the SDK signer canonicalizes it: runs
+// of spaces collapsed to one, then leading and trailing whitespace trimmed.
+// Only spaces are collapsed; a tab inside the value is kept.
+func canonicalValue(v string) string {
+	var sb strings.Builder
+	sb.Grow(len(v))
+	for i := range len(v) {
+		if v[i] == ' ' && i > 0 && v[i-1] == ' ' {
+			continue
+		}
+		sb.WriteByte(v[i])
+	}
+	return strings.TrimSpace(sb.String())
 }
 
 // uriEncode percent-encodes everything but the RFC 3986 unreserved characters,
