@@ -102,28 +102,74 @@ func (v *Verifier) replaceBody(r *http.Request, s *signed, buffered []byte) {
 			h:         sha256.New(),
 			want:      s.payloadHash,
 			mapErr:    v.mapError,
+			length:    r.ContentLength,
 			presigned: s.presigned,
 		}
 	}
 }
 
-// payloadVerifier fails the read that reaches EOF when the body's SHA-256 does
-// not match the declared one, so an upload reading it is not committed.
+// payloadVerifier checks a streamed body against its declared SHA-256 and
+// fails the read where the body is found not to match it, so an upload
+// reading it is not committed.
+//
+// With a known Content-Length the hash is checked on the read that reaches
+// that many bytes, so a handler that reads exactly Content-Length bytes and
+// stops, as io.ReadFull, io.LimitReader and http.MaxBytesReader do, still
+// sees the failure. A read past Content-Length fails, and so does an EOF
+// short of it. With an unknown length, the read that reaches EOF is checked.
+//
+// A failing read returns no bytes: io.ReadFull drops an error that comes
+// with a full buffer, so a read that filled it would hide the failure.
 type payloadVerifier struct {
 	body      io.ReadCloser
 	h         hash.Hash
 	mapErr    func(*Error) error
 	want      string
+	length    int64 // Content-Length, or -1 when unknown
+	n         int64 // bytes read so far
+	checked   bool  // the hash was checked at Content-Length and matched
 	presigned bool
 }
 
 func (p *payloadVerifier) Read(b []byte) (int, error) {
 	n, err := p.body.Read(b)
+	if p.length >= 0 && p.n+int64(n) > p.length {
+		// The body runs past Content-Length, which the hash does not cover.
+		p.n = p.length
+		return 0, p.mismatch()
+	}
 	p.h.Write(b[:n])
-	if errors.Is(err, io.EOF) && !strings.EqualFold(hex.EncodeToString(p.h.Sum(nil)), p.want) {
-		return n, p.mapErr(newError(KindPayloadHashMismatch, p.presigned, hashMismatchText))
+	p.n += int64(n)
+	if !p.valid(errors.Is(err, io.EOF)) {
+		return 0, p.mismatch()
 	}
 	return n, err //nolint:wrapcheck // io.Reader contract: EOF must pass through unwrapped
+}
+
+// valid reports whether the body read so far may be handed over: it is
+// checked once it reaches Content-Length, or at EOF when its length is
+// unknown, and an EOF short of a known length fails.
+func (p *payloadVerifier) valid(eof bool) bool {
+	known := p.length >= 0
+	switch {
+	case p.checked:
+		return true
+	case known && p.n == p.length:
+		p.checked = p.matches()
+		return p.checked
+	case eof:
+		return !known && p.matches()
+	default:
+		return true
+	}
+}
+
+func (p *payloadVerifier) matches() bool {
+	return strings.EqualFold(hex.EncodeToString(p.h.Sum(nil)), p.want)
+}
+
+func (p *payloadVerifier) mismatch() error {
+	return p.mapErr(newError(KindPayloadHashMismatch, p.presigned, hashMismatchText))
 }
 
 func (p *payloadVerifier) Close() error {
