@@ -157,7 +157,10 @@ type StaticKeyConfig struct {
 }
 
 // StaticKey is a KeySource over one long-term access key and its secret.
-// Its principal is Root, with no policies.
+// Its principal is Root, with no policies. When its ARN is the account's
+// root user, the principal is that root user: its PrincipalARN is the ARN,
+// its UserID the account ID, and its Type PrincipalTypeAccount. Under any
+// other ARN they are left empty, since a StaticKey does not know them.
 type StaticKey struct {
 	secretAccessKey string
 	principal       Principal
@@ -175,18 +178,20 @@ func NewStaticKey(cfg StaticKeyConfig) (*StaticKey, error) {
 	if cfg.AccountID == "" {
 		cfg.AccountID = DefaultAccountID
 	}
+	rootARN := "arn:aws:iam::" + cfg.AccountID + ":root"
 	if cfg.ARN == "" {
-		cfg.ARN = "arn:aws:iam::" + cfg.AccountID + ":root"
+		cfg.ARN = rootARN
 	}
-	return &StaticKey{
-		secretAccessKey: cfg.SecretAccessKey,
-		principal: Principal{
-			AccountID:   cfg.AccountID,
-			ARN:         cfg.ARN,
-			AccessKeyID: cfg.AccessKeyID,
-			Root:        true,
-		},
-	}, nil
+	p := Principal{
+		AccountID:   cfg.AccountID,
+		ARN:         cfg.ARN,
+		AccessKeyID: cfg.AccessKeyID,
+		Root:        true,
+	}
+	if cfg.ARN == rootARN {
+		p.PrincipalARN, p.UserID, p.Type = cfg.ARN, cfg.AccountID, PrincipalTypeAccount
+	}
+	return &StaticKey{secretAccessKey: cfg.SecretAccessKey, principal: p}, nil
 }
 
 // SigningKey returns the key scope signs with, ErrUnknownAccessKey when scope

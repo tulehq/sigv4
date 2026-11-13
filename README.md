@@ -365,7 +365,9 @@ It returns an error when the access key ID or secret is empty.
 It refuses any request that carries a session token. Its principal's
 `AccountID` defaults to `DefaultAccountID` (`000000000000`), and its `ARN` to
 the account's root user, `arn:aws:iam::<AccountID>:root`. Its principal is
-`Root`, with no policies.
+`Root`, with no policies. Under the root user's ARN, its `PrincipalARN` is
+that ARN, its `UserID` the account ID and its `Type` `Account`; under any
+other ARN those are empty, since a static key does not know them.
 `DeriveSigningKey(secret, date, region, service)` derives a key for an
 implementation that holds secrets.
 
