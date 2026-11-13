@@ -304,6 +304,28 @@ the account's root user, `arn:aws:iam::<AccountID>:root`.
 `DeriveSigningKey(secret, date, region, service)` derives a key for an
 implementation that holds secrets.
 
+## Chaining key sources
+
+`sigv4.Chain(sources...)` asks each source in order. A source that answers
+`ErrUnknownAccessKey` (by `errors.Is`) passes the scope to the next; the
+first other answer, a key or any other error, is final. When every source
+answers unknown, as an empty chain does, the chain answers
+`ErrUnknownAccessKey`. A service that accepts its configured root key and
+any key the identity service issued uses:
+
+```go
+keys := sigv4.Chain(rootKey, identityClient)
+```
+
+For the chain to work, each source must answer `ErrUnknownAccessKey` for a
+key ID it does not hold, whatever else the scope carries. `StaticKey` does:
+a session token on another key ID is unknown to it and falls through to the
+source that issued the token. It answers `ErrInvalidSessionToken` only for
+a token on its own key ID, and that answer is final. An earlier source
+answers faster than a later one, so timing can tell which source holds a key
+ID; put the cheapest first. `Chain` panics on a nil source, including a nil
+`*StaticKey` from a `NewStaticKey` whose error was dropped.
+
 ## Session tokens
 
 Temporary credentials from STS carry a session token, which the SDK signer
