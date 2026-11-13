@@ -40,7 +40,7 @@ if err != nil {
 next.ServeHTTP(w, verified)
 
 // In a handler:
-p, ok := sigv4.PrincipalFrom(r.Context()) // p.AccountID, p.ARN, p.AccessKeyID, p.Root, p.Policies
+p, ok := sigv4.PrincipalFrom(r.Context()) // p.AccountID, p.ARN, p.AccessKeyID, p.Root, p.Policies, ...
 s, ok := sigv4.ScopeFrom(r.Context())     // the verified credential scope: s.Service, s.Region, ...
 ```
 
@@ -59,6 +59,44 @@ such as the root user; a root principal is never evaluated against policies.
 as a `KeySource` such as the identity service supplies them, each a
 `json.RawMessage`. They are opaque JSON for a policy evaluator: sigv4 does not
 interpret them, and `Verify` passes `Root` and `Policies` through unchanged.
+
+A `Principal` also carries the values AWS puts in the request context for
+the principal's condition keys, as its `KeySource` supplies them. `Verify`
+passes them through unchanged, and a field the `KeySource` does not supply
+is empty.
+
+| Field | Condition key | IAM user | Role session | Root user |
+| --- | --- | --- | --- | --- |
+| `PrincipalARN` | `aws:PrincipalArn` | the IAM user's ARN | the role ARN, `arn:aws:iam::<account>:role/<path><name>`, path included | `arn:aws:iam::<account>:root` |
+| `UserID` | `aws:userid` | the IAM user's unique ID, `AIDA...` | `<role ID>:<session name>`, the role ID being `AROA...` | the account ID |
+| `Type` | `aws:PrincipalType` | `User` | `AssumedRole` | `Account` |
+| `Tags` | `aws:PrincipalTag/<key>` | the IAM user's tags | the role's tags and the session tags, a session tag replacing the role tag with the same key | none |
+
+`ARN` stays the ARN of the identity that signed. For a role session that is
+the assumed-role ARN, `arn:aws:sts::<account>:assumed-role/<role
+name>/<session name>`, which names the role without its path, so
+`PrincipalARN` is where a session's role ARN is found. Tag keys are unique
+regardless of case and keep the case they were set with, as IAM's are, and
+`aws:PrincipalTag/<key>` names a key regardless of case.
+
+These are what a resource-based policy's `Principal` element matches. An
+account principal (the account ID, or `arn:aws:iam::<account>:root`) names
+`AccountID`. A user ARN names `PrincipalARN`, which for a user is also
+`ARN`. A role ARN names a session of that role through `PrincipalARN`. An
+assumed-role ARN names `ARN`. A unique ID names `UserID` for a user, and
+the role ID that `UserID` starts with for a session.
+
+The values are AWS's, from the IAM User Guide:
+[global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html)
+(`aws:PrincipalArn`, `aws:PrincipalTag`),
+[principal key values](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable)
+(`aws:userid`, `aws:PrincipalType`),
+[IAM identifiers](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html)
+(ARN formats and unique ID prefixes),
+[the Principal element](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html),
+and the `Tags` parameter of STS
+[AssumeRole](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html)
+(a session tag overriding a role tag of the same key, regardless of case).
 
 An AWS JSON service, such as secret-store or accounts:
 
@@ -280,11 +318,15 @@ type Scope struct {
 }
 
 type Principal struct {
-	AccountID   string
-	ARN         string
-	AccessKeyID string
-	Policies    []json.RawMessage // identity policy documents, opaque to sigv4
-	Root        bool              // full access to its account; never evaluated against policies
+	Tags         map[string]string // aws:PrincipalTag/<key>
+	AccountID    string
+	ARN          string            // the signer's ARN; assumed-role for a session
+	PrincipalARN string            // aws:PrincipalArn; the role ARN for a session
+	UserID       string            // aws:userid
+	AccessKeyID  string
+	Type         PrincipalType     // aws:PrincipalType: Account, User or AssumedRole
+	Policies     []json.RawMessage // identity policy documents, opaque to sigv4
+	Root         bool              // full access to its account; never evaluated against policies
 }
 
 type Key struct {

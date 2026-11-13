@@ -39,11 +39,64 @@ type Scope struct {
 	Service string
 }
 
+// PrincipalType is the kind of principal that signed a request, the value
+// AWS gives the aws:PrincipalType condition key.
+type PrincipalType string
+
+// The principal types a KeySource reports, as AWS spells them for
+// aws:PrincipalType.
+const (
+	// PrincipalTypeAccount is an account's root user.
+	PrincipalTypeAccount PrincipalType = "Account"
+	// PrincipalTypeUser is an IAM user.
+	PrincipalTypeUser PrincipalType = "User"
+	// PrincipalTypeAssumedRole is a role session: a principal signing with
+	// the temporary credentials of an assumed role.
+	PrincipalTypeAssumedRole PrincipalType = "AssumedRole"
+)
+
 // Principal is who signed a request.
+//
+// Besides ARN, a Principal carries the values AWS puts in the request
+// context for the principal's condition keys, as its KeySource supplies
+// them; sigv4 does not interpret them, and Verify passes them through
+// unchanged. A field the KeySource does not supply is its zero value.
+//
+// Matching a resource-based policy's Principal element takes these fields
+// together. An account principal (the account ID, or
+// arn:aws:iam::<account>:root) names AccountID. A user ARN names
+// PrincipalARN, which for a user is also ARN. A role ARN names a session of
+// that role through PrincipalARN, since a session's ARN is the
+// assumed-role ARN. An assumed-role ARN names ARN. A unique ID names
+// UserID for a user, and the role ID that UserID starts with for a session.
 type Principal struct {
-	AccountID   string
-	ARN         string
+	// Tags are the principal's tags, the values of aws:PrincipalTag/<key>:
+	// an IAM user's tags, or, for a role session, the role's tags merged
+	// with the session's tags, a session tag replacing the role tag with
+	// the same key. Tag keys are unique regardless of case, and keep the
+	// case they were set with; aws:PrincipalTag/<key> names a key
+	// regardless of case. Nil when the principal has none.
+	Tags map[string]string
+
+	AccountID string
+	// ARN is the ARN of the identity that signed: its own ARN for an IAM
+	// user, arn:aws:iam::<account>:root for the root user, and the
+	// assumed-role ARN, arn:aws:sts::<account>:assumed-role/<role
+	// name>/<session name>, for a role session. The assumed-role ARN names
+	// the role without its path.
+	ARN string
+	// PrincipalARN is the value of aws:PrincipalArn: ARN for an IAM user or
+	// the root user, and, for a role session, the ARN of the role,
+	// arn:aws:iam::<account>:role/<path><role name>, path included.
+	PrincipalARN string
+	// UserID is the value of aws:userid: an IAM user's unique ID
+	// (AIDA...), the account ID for the root user, and <role ID>:<session
+	// name> for a role session, where the role ID is the role's unique ID
+	// (AROA...).
+	UserID      string
 	AccessKeyID string
+	// Type is the value of aws:PrincipalType.
+	Type PrincipalType
 	// Policies are the identity policy documents in effect for the
 	// principal, as its KeySource supplies them. They are opaque JSON for a
 	// policy evaluator; sigv4 does not interpret them, and Verify passes
