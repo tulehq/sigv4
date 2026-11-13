@@ -167,7 +167,7 @@ func TestSessionTokenOnAnUnsignedHeader(t *testing.T) {
 }
 
 func TestSessionTokenWireErrors(t *testing.T) {
-	s3, sm := sdkServices()[0], sdkServices()[1]
+	s3, sm, smMap := sdkServices()[0], sdkServices()[1], jsonServices[0].wireMap
 	tests := []struct {
 		keys KeySource
 		edit func(*http.Request)
@@ -192,7 +192,7 @@ func TestSessionTokenWireErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "json invalid token", svc: sm, mapE: jsonMap, keys: tempKeys{},
+			name: "json invalid token", svc: sm, mapE: smMap, keys: tempKeys{},
 			edit: func(r *http.Request) { r.Header.Set(tokenHeader, "forged") },
 			want: wire{
 				status: http.StatusForbidden, code: "UnrecognizedClientException",
@@ -200,7 +200,7 @@ func TestSessionTokenWireErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "json expired token", svc: sm, mapE: jsonMap, keys: tempKeys{expired: true},
+			name: "json expired token", svc: sm, mapE: smMap, keys: tempKeys{expired: true},
 			want: wire{
 				status: http.StatusForbidden, code: "ExpiredTokenException",
 				message: "The security token included in the request is expired",

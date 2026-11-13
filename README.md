@@ -180,23 +180,23 @@ codes.
 | Kind | Condition | object-store (S3) | secret-store, accounts (AWS JSON) |
 |---|---|---|---|
 | `KindMissingAuth` | No `Authorization` header (and no presigned URL, when accepted) | 403 `AccessDenied` "Access Denied" | 403 `MissingAuthenticationTokenException` |
-| `KindUnsupportedAlgorithm` | Not `AWS4-HMAC-SHA256` | header: 400 `InvalidRequest`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
-| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted and unique | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
-| `KindInvalidDate` | `X-Amz-Date` missing or malformed | header: 403 `AccessDenied`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
+| `KindUnsupportedAlgorithm` | Not `AWS4-HMAC-SHA256` | header: 400 `InvalidRequest`; presigned: 400 `AuthorizationQueryParametersError` | `IncompleteSignatureException` (7) |
+| `KindIncompleteAuth` | Header lacks `Credential`, `SignedHeaders` or `Signature`; presigned URL lacks an `X-Amz-*` parameter; `SignedHeaders` is not lowercase, sorted and unique | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | `IncompleteSignatureException` (7) |
+| `KindInvalidDate` | `X-Amz-Date` missing or malformed | header: 403 `AccessDenied`; presigned: 400 `AuthorizationQueryParametersError` | `IncompleteSignatureException` (7) |
 | `KindRequestTimeTooSkewed` | `X-Amz-Date` beyond the skew | 403 `RequestTimeTooSkewed` "The difference between the request time and the current time is too large." | 403 `InvalidSignatureException` |
 | `KindInvalidExpires` | `X-Amz-Expires` not 1 to the maximum, "X-Amz-Expires must be a number of seconds between 1 and 604800" | 400 `AuthorizationQueryParametersError` | (presigned URLs off) |
 | `KindExpired` | Presigned URL past its expiry | 403 `AccessDenied` "Request has expired" | (presigned URLs off) |
 | `KindRequestNotYetValid` | Presigned URL dated beyond the skew | 403 `AccessDenied` "Request is not yet valid" (1) | (presigned URLs off) |
 | `KindMissingPayloadHash` | Streamed payload, header request without `X-Amz-Content-Sha256` | 400 `InvalidRequest` | (buffered payload) |
-| `KindUnsignedHeader` | A required header, or `X-Amz-Security-Token`, is not signed | 403 `AccessDenied` "There were headers present in the request which were not signed" (2) | 403 `IncompleteSignatureException` |
-| `KindMalformedCredential` | Credential not `<key>/<date>/<region>/<service>/aws4_request` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
+| `KindUnsignedHeader` | A required header, or `X-Amz-Security-Token`, is not signed | 403 `AccessDenied` "There were headers present in the request which were not signed" (2) | `IncompleteSignatureException` (7) |
+| `KindMalformedCredential` | Credential not `<key>/<date>/<region>/<service>/aws4_request` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | `IncompleteSignatureException` (7) |
 | `KindUnknownAccessKey` | The `KeySource` does not know the access key ID, or a temporary one came without its token | 403 `InvalidAccessKeyId` "The AWS Access Key Id you provided does not exist in our records." | 403 `UnrecognizedClientException` |
 | `KindInvalidSessionToken` | The `KeySource` refused the session token, the key takes none, or header and query carry different tokens | 400 `InvalidToken` "The provided token is malformed or otherwise invalid." (3) | 403 `UnrecognizedClientException` "The security token included in the request is invalid." |
 | `KindExpiredSessionToken` | The `KeySource` reports the token expired | 400 `ExpiredToken` "The provided token has expired." (3) | 403 `ExpiredTokenException` "The security token included in the request is expired" (4) |
-| `KindCredentialDateMismatch` | Credential date is not the day of `X-Amz-Date` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | 403 `IncompleteSignatureException` |
+| `KindCredentialDateMismatch` | Credential date is not the day of `X-Amz-Date` | header: 400 `AuthorizationHeaderMalformed`; presigned: 400 `AuthorizationQueryParametersError` | `IncompleteSignatureException` (7) |
 | `KindBodyUnreadable` | Buffered payload, the body read failed | (streamed payload) | 400 `InvalidParameterException` / `InvalidInputException` |
 | `KindBodyTooLarge` | Buffered payload over the limit, or a body over `ReadBody`'s limit | 400 `MaxMessageLengthExceeded` "Your request was too big." (5), from `ReadBody` | 413 `InvalidParameterException` / `InvalidInputException` |
-| `KindPayloadHashNotAccepted` | `X-Amz-Content-Sha256` not hex and not accepted | (any accepted) | 403 `IncompleteSignatureException` |
+| `KindPayloadHashNotAccepted` | `X-Amz-Content-Sha256` not hex and not accepted | (any accepted) | `IncompleteSignatureException` (7) |
 | `KindPayloadHashMismatch` | Hex `X-Amz-Content-Sha256` does not match the body, or the body is longer or shorter than `Content-Length` | 400 `XAmzContentSHA256Mismatch`, on the body's read, `Close` or `ReadBody` | 400 `InvalidParameterException` / `InvalidInputException` |
 | `KindUnverifiedPayload` | `ReadBody` on a body no payload hash covers or that was wrapped after `Verify`, or `Close` with more of a streamed body unread than it reads | 400 `InvalidRequest` (6) | 400 `InvalidParameterException` / `InvalidInputException` (6) |
 | `KindSignatureMismatch` | The signature is wrong | 403 `SignatureDoesNotMatch` "The request signature we calculated does not match the signature you provided. Check your key and signing method." | 403 `InvalidSignatureException` |
@@ -222,6 +222,12 @@ Where each new S3 and token response comes from:
 6. No AWS counterpart: S3 accepts unsigned payloads and so has no error for
    a body it cannot verify, and the JSON services always cover their body.
    The codes shown are the services' choice.
+7. The status differs per service, as each one's Common Errors page gives
+   it: secret-store answers 400, per the
+   [Secrets Manager Common Errors](https://docs.aws.amazon.com/secretsmanager/latest/apireference/CommonErrors.html),
+   and accounts answers 403, per the
+   [Organizations Common Errors](https://docs.aws.amazon.com/organizations/latest/APIReference/CommonErrors.html).
+   A new JSON service takes its status from its own page.
 
 The JSON services use `InvalidParameterException` (Secrets Manager) or
 `InvalidInputException` (Organizations) where the table shows both. The

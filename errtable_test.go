@@ -323,10 +323,8 @@ func runRow(t *testing.T, v *Verifier, row tableRow) {
 	wantWire(t, err, row.want)
 }
 
-// The JSON rows are shared by secret-store and accounts; "<invalid>" stands
-// for the service's bad-input type, InvalidParameterException or
-// InvalidInputException.
-const invalid = "<invalid>"
+// The JSON rows are shared by secret-store and accounts, each row answered
+// with the service's own status and bad-input type.
 
 func jsonHeaderRows(svc jsonService) []tableRow {
 	forbidden := http.StatusForbidden
@@ -352,14 +350,14 @@ func jsonHeaderRows(svc jsonService) []tableRow {
 		{
 			name:    "unsupported algorithm",
 			request: withAuth(signed, replacer(algorithm, "AWS4-HMAC-SHA512")),
-			want:    wire{status: forbidden, code: typeIncompleteSig, message: mechanismText},
+			want:    svc.incomplete(mechanismText),
 		},
 		{
 			name: "header without SignedHeaders",
 			request: withAuth(signed, func(a string) string {
 				return strings.Replace(a, "SignedHeaders=", "Signed=", 1)
 			}),
-			want: wire{status: forbidden, code: typeIncompleteSig, message: incompleteText},
+			want: svc.incomplete(incompleteText),
 		},
 		{
 			name: "missing X-Amz-Date",
@@ -369,7 +367,7 @@ func jsonHeaderRows(svc jsonService) []tableRow {
 				r.Header.Del("X-Amz-Date")
 				return r
 			},
-			want: wire{status: forbidden, code: typeIncompleteSig, message: dateHeaderText},
+			want: svc.incomplete(dateHeaderText),
 		},
 		{
 			name:    "request time too skewed",
@@ -401,31 +399,22 @@ func jsonSignedHeaderRows(svc jsonService) []tableRow {
 		{
 			name:    "host not signed",
 			request: drop("host"),
-			want: wire{
-				status: forbidden, code: typeIncompleteSig,
-				message: "The request signature must cover the host header.",
-			},
+			want:    svc.incomplete("The request signature must cover the host header."),
 		},
 		{
 			name:    "x-amz-date not signed",
 			request: drop("x-amz-date"),
-			want: wire{
-				status: forbidden, code: typeIncompleteSig,
-				message: "The request signature must cover the x-amz-date header.",
-			},
+			want:    svc.incomplete("The request signature must cover the x-amz-date header."),
 		},
 		{
 			name:    "x-amz-target not signed",
 			request: drop("x-amz-target"),
-			want: wire{
-				status: forbidden, code: typeIncompleteSig,
-				message: "The request signature must cover the x-amz-target header.",
-			},
+			want:    svc.incomplete("The request signature must cover the x-amz-target header."),
 		},
 		{
 			name:    "malformed credential",
 			request: withAuth(signed, replacer("/aws4_request", "")),
-			want:    wire{status: forbidden, code: typeIncompleteSig, message: credMalformed},
+			want:    svc.incomplete(credMalformed),
 		},
 		{
 			name:    "unknown access key",
@@ -438,7 +427,7 @@ func jsonSignedHeaderRows(svc jsonService) []tableRow {
 		{
 			name:    "credential date mismatch",
 			request: withAuth(signed, replacer("/20260304/", "/20260303/")),
-			want:    wire{status: forbidden, code: typeIncompleteSig, message: credDateText},
+			want:    svc.incomplete(credDateText),
 		},
 	}
 }
@@ -465,7 +454,7 @@ func jsonBodyRows(svc jsonService) []tableRow {
 			name:    "body unreadable",
 			request: withBody(failingReader{}),
 			want: wire{
-				status: http.StatusBadRequest, code: invalid,
+				status: http.StatusBadRequest, code: svc.invalidInput,
 				message: "The request body could not be read.",
 			},
 		},
@@ -473,7 +462,7 @@ func jsonBodyRows(svc jsonService) []tableRow {
 			name:    "body too large",
 			request: withBody(strings.NewReader(strings.Repeat("a", DefaultMaxBodySize+1))),
 			want: wire{
-				status: http.StatusRequestEntityTooLarge, code: invalid,
+				status: http.StatusRequestEntityTooLarge, code: svc.invalidInput,
 				message: "The request body is larger than this service accepts.",
 			},
 		},
@@ -491,9 +480,9 @@ func jsonPayloadRows(svc jsonService) []tableRow {
 			})
 		}
 	}
-	notAccepted := wire{status: http.StatusForbidden, code: typeIncompleteSig, message: "x-amz-" +
+	notAccepted := svc.incomplete("x-amz-" +
 		"content-sha256 must be the hex SHA-256 of the request body; UNSIGNED-PAYLOAD is not " +
-		"accepted."}
+		"accepted.")
 	return []tableRow{
 		{name: "UNSIGNED-PAYLOAD", request: declared(unsignedPayload), want: notAccepted},
 		{
@@ -506,7 +495,7 @@ func jsonPayloadRows(svc jsonService) []tableRow {
 			name:    "declared hash does not match the body",
 			request: declared(strings.Repeat("a", 64)),
 			want: wire{
-				status: http.StatusBadRequest, code: invalid,
+				status: http.StatusBadRequest, code: svc.invalidInput,
 				message: hashMismatchText,
 			},
 		},
@@ -530,7 +519,7 @@ func TestJSONErrorTable(t *testing.T) {
 		rows = append(rows, jsonPayloadRows(svc)...)
 		for _, row := range rows {
 			t.Run(svc.name+"/"+row.name, func(t *testing.T) {
-				v := jsonVerifier(t, append([]Option{WithErrorMap(jsonMap)}, row.opts...)...)
+				v := jsonVerifier(t, append([]Option{WithErrorMap(svc.wireMap)}, row.opts...)...)
 				runRow(t, v, row)
 			})
 		}
