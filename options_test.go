@@ -493,6 +493,74 @@ func TestVerifyPassesRootAndPoliciesThrough(t *testing.T) {
 	}
 }
 
+// Principals shaped as the IAM User Guide's examples: aws:PrincipalArn,
+// aws:userid and aws:PrincipalType as AWS gives them for each kind of
+// principal, and, for the role session, its role tags and session tags as
+// merged.
+func TestVerifyPassesPrincipalAttributesThrough(t *testing.T) {
+	static := mustStatic(
+		t,
+		StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey},
+	)
+	for name, want := range map[string]Principal{
+		"user": {
+			AccountID:    "111122223333",
+			ARN:          "arn:aws:iam::111122223333:user/division_abc/subdivision_xyz/app-runner",
+			PrincipalARN: "arn:aws:iam::111122223333:user/division_abc/subdivision_xyz/app-runner",
+			UserID:       "AIDACKCEVSQ6C2EXAMPLE",
+			Type:         PrincipalTypeUser,
+			Tags:         map[string]string{"team": "yellow"},
+			AccessKeyID:  testAccessKey,
+		},
+		"role session": {
+			AccountID:    "111122223333",
+			ARN:          "arn:aws:sts::111122223333:assumed-role/RDSAccess/ci-session",
+			PrincipalARN: "arn:aws:iam::111122223333:role/application_abc/component_xyz/RDSAccess",
+			UserID:       "AROADBQP57FF2AEXAMPLE:ci-session",
+			Type:         PrincipalTypeAssumedRole,
+			Tags:         map[string]string{"Department": "engineering", "Project": "Pegasus"},
+			AccessKeyID:  testAccessKey,
+		},
+		"root": {
+			AccountID:    "111122223333",
+			ARN:          "arn:aws:iam::111122223333:root",
+			PrincipalARN: "arn:aws:iam::111122223333:root",
+			UserID:       "111122223333",
+			Type:         PrincipalTypeAccount,
+			AccessKeyID:  testAccessKey,
+			Root:         true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := jsonServices[0]
+			v := mustNew(t, policyKeys{static: static, principal: want},
+				append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
+			got, err := v.Verify(svc.signJSON(t, svc.body))
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			p, ok := PrincipalFrom(got.Context())
+			if !ok || !reflect.DeepEqual(p, want) {
+				t.Fatalf("principal = %+v, %v; want %+v", p, ok, want)
+			}
+		})
+	}
+}
+
+func TestPrincipalTypesAreAWSValues(t *testing.T) {
+	// The aws:PrincipalType values of the IAM User Guide's principal key
+	// values table.
+	for got, want := range map[PrincipalType]string{
+		PrincipalTypeAccount:     "Account",
+		PrincipalTypeUser:        "User",
+		PrincipalTypeAssumedRole: "AssumedRole",
+	} {
+		if string(got) != want {
+			t.Errorf("principal type = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestVerifyPutsTheScopeInTheContext(t *testing.T) {
 	svc := jsonServices[0]
 	r := svc.signJSON(t, svc.body)
