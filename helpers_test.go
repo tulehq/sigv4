@@ -87,6 +87,10 @@ type jsonService struct {
 	body         string
 	otherBody    string
 	invalidInput string // the error type the service answers bad input with
+	// incompleteStatus is the status the service answers
+	// IncompleteSignatureException with: each service's Common Errors page
+	// gives its own, 400 for Secrets Manager and 403 for Organizations.
+	incompleteStatus int
 }
 
 var jsonServices = []jsonService{
@@ -98,6 +102,8 @@ var jsonServices = []jsonService{
 		body:         `{"SecretId":"example/app"}`,
 		otherBody:    `{"SecretId":"example/app","ForceDeleteWithoutRecovery":true}`,
 		invalidInput: "InvalidParameterException",
+		// https://docs.aws.amazon.com/secretsmanager/latest/apireference/CommonErrors.html
+		incompleteStatus: http.StatusBadRequest,
 	},
 	{
 		name:         "organizations",
@@ -107,6 +113,8 @@ var jsonServices = []jsonService{
 		body:         `{"AccountId":"111111111111"}`,
 		otherBody:    `{"AccountId":"222222222222"}`,
 		invalidInput: "InvalidInputException",
+		// https://docs.aws.amazon.com/organizations/latest/APIReference/CommonErrors.html
+		incompleteStatus: http.StatusForbidden,
 	},
 }
 
@@ -169,8 +177,16 @@ type wireError struct {
 
 func (e *wireError) Error() string { return e.code + ": " + e.message }
 
-func s3Map(e *Error) error   { return &wireError{s3Wire(e)} }
-func jsonMap(e *Error) error { return &wireError{jsonWire(e, "<invalid>")} }
+func s3Map(e *Error) error { return &wireError{s3Wire(e)} }
+
+// incomplete is the IncompleteSignatureException svc answers with msg.
+func (svc jsonService) incomplete(msg string) wire {
+	return wire{status: svc.incompleteStatus, code: "IncompleteSignatureException", message: msg}
+}
+
+// wireMap is the error map svc is to adopt, for WithErrorMap.
+func (svc jsonService) wireMap(e *Error) error { return &wireError{jsonWire(e, svc)} }
+
 func wantWire(t *testing.T, err error, want wire) {
 	t.Helper()
 	var we *wireError
@@ -270,11 +286,12 @@ func s3Wire(e *Error) wire {
 	return w
 }
 
-// jsonWire maps an *Error to the AWS JSON error secret-store and accounts
-// answer with today. invalidInput is the service's bad-input type:
-// InvalidParameterException for Secrets Manager, InvalidInputException for
-// Organizations.
-func jsonWire(e *Error, invalidInput string) wire {
+// jsonWire maps an *Error to the AWS JSON error svc answers with:
+// secret-store or accounts. The services differ in their bad-input type,
+// InvalidParameterException for Secrets Manager and InvalidInputException
+// for Organizations, and in the status of IncompleteSignatureException.
+func jsonWire(e *Error, svc jsonService) wire {
+	invalidInput := svc.invalidInput
 	switch e.Kind {
 	case KindMissingAuth:
 		return wire{
@@ -284,7 +301,7 @@ func jsonWire(e *Error, invalidInput string) wire {
 	case KindUnsupportedAlgorithm, KindIncompleteAuth, KindInvalidDate, KindUnsignedHeader,
 		KindMalformedCredential, KindCredentialDateMismatch, KindPayloadHashNotAccepted:
 		return wire{
-			status: http.StatusForbidden, code: "IncompleteSignatureException", message: e.Message,
+			status: svc.incompleteStatus, code: "IncompleteSignatureException", message: e.Message,
 		}
 	case KindRequestTimeTooSkewed, KindSignatureMismatch:
 		return wire{

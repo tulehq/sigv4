@@ -29,7 +29,7 @@ func wantJSONType(t *testing.T, svc jsonService, err error, errType string) wire
 	if !errors.As(err, &e) {
 		t.Fatalf("Verify = %v, want an *Error", err)
 	}
-	w := jsonWire(e, svc.invalidInput)
+	w := jsonWire(e, svc)
 	if w.code != errType {
 		t.Fatalf("error type = %s (kind %s), want %s", w.code, e.Kind, errType)
 	}
@@ -245,5 +245,22 @@ func TestJSONVerifyRequiresTheHeadersThatNameTheRequest(t *testing.T) {
 
 			wantJSONType(t, svc, jsonVerifier(t).check(req), typeIncompleteSig)
 		})
+	}
+}
+
+func TestJSONIncompleteSignatureStatus(t *testing.T) {
+	// Each service's Common Errors page gives IncompleteSignature its own
+	// status: 400 for Secrets Manager, 403 for Organizations.
+	want := map[string]int{
+		"secretsmanager": http.StatusBadRequest,
+		"organizations":  http.StatusForbidden,
+	}
+	for _, svc := range jsonServices {
+		req := svc.signJSON(t, svc.body)
+		req.Header.Del("X-Amz-Date")
+		w := wantJSONType(t, svc, jsonVerifier(t).check(req), typeIncompleteSig)
+		if w.status != want[svc.name] {
+			t.Fatalf("%s: status %d, want %d", svc.name, w.status, want[svc.name])
+		}
 	}
 }
