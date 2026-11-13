@@ -1,7 +1,9 @@
 package sigv4_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -109,4 +111,60 @@ func ExampleNew_s3() {
 		log.Fatal(err)
 	}
 	http.Handle("/", verifySignature(v, http.NotFoundHandler()))
+}
+
+// identityClient stands in for a client of the identity service, which
+// holds the temporary keys it issued.
+type identityClient struct{}
+
+func (identityClient) SigningKey(_ context.Context, s sigv4.Scope) (sigv4.Key, error) {
+	if s.AccessKeyID != "ASIAEXAMPLE" {
+		return sigv4.Key{}, sigv4.ErrUnknownAccessKey
+	}
+	if s.SessionToken != "session-token" {
+		return sigv4.Key{}, sigv4.ErrInvalidSessionToken
+	}
+	return sigv4.Key{
+		Principal: sigv4.Principal{
+			AccountID:   "111122223333",
+			ARN:         "arn:aws:sts::111122223333:assumed-role/dev/session",
+			AccessKeyID: s.AccessKeyID,
+		},
+		Signing: sigv4.DeriveSigningKey("temporary secret", s.Date, s.Region, s.Service),
+	}, nil
+}
+
+// A service accepts its configured root key and any key the identity
+// service issued.
+func ExampleChain() {
+	root, err := sigv4.NewStaticKey(sigv4.StaticKeyConfig{
+		AccessKeyID: "AKIDEXAMPLE", SecretAccessKey: "secret",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	keys := sigv4.Chain(root, identityClient{})
+
+	ctx := context.Background()
+	for _, scope := range []sigv4.Scope{
+		{AccessKeyID: "AKIDEXAMPLE", Date: "20261113", Region: "us-east-1", Service: "s3"},
+		{
+			AccessKeyID: "ASIAEXAMPLE", SessionToken: "session-token", Date: "20261113",
+			Region: "us-east-1", Service: "s3",
+		},
+		{AccessKeyID: "AKIDEXAMPLE", SessionToken: "session-token"},
+		{AccessKeyID: "AKIDNOBODY"},
+	} {
+		key, err := keys.SigningKey(ctx, scope)
+		if err != nil {
+			fmt.Println(scope.AccessKeyID, err)
+			continue
+		}
+		fmt.Println(scope.AccessKeyID, key.Principal.ARN)
+	}
+	// Output:
+	// AKIDEXAMPLE arn:aws:iam::000000000000:root
+	// ASIAEXAMPLE arn:aws:sts::111122223333:assumed-role/dev/session
+	// AKIDEXAMPLE sigv4: invalid session token
+	// AKIDNOBODY sigv4: unknown access key ID
 }
