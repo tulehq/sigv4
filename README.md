@@ -86,6 +86,16 @@ account principal (the account ID, or `arn:aws:iam::<account>:root`) names
 assumed-role ARN names `ARN`. A unique ID names `UserID` for a user, and
 the role ID that `UserID` starts with for a session.
 
+**A session whose role no longer exists.** For a `Type` of `AssumedRole`,
+an empty `PrincipalARN` means the session's role no longer exists, never
+that the `KeySource` did not supply it. A session is bound to its role's
+unique ID, so a role created again under the deleted role's name is not its
+role. A service must then supply `aws:PrincipalArn` to its policy evaluator
+as an empty slice, which `tule.dev/policy` reads as an absent key, and must
+never derive it from `ARN`: the assumed-role ARN still names the role, so
+the session would match what the new role's ARN is granted. Nor may the
+session match a role ARN in a resource-based policy's `Principal` element.
+
 The values are AWS's, from the IAM User Guide:
 [global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html)
 (`aws:PrincipalArn`, `aws:PrincipalTag`),
