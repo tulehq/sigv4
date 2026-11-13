@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -35,7 +36,7 @@ func TestChainOrder(t *testing.T) {
 	second, secondCalls := answer(Key{}, errors.New("not asked"))
 
 	key, err := Chain(first, second).SigningKey(context.Background(), Scope{AccessKeyID: "AKID"})
-	if err != nil || key.Principal != chainKey.Principal {
+	if err != nil || !reflect.DeepEqual(key.Principal, chainKey.Principal) {
 		t.Fatalf("SigningKey = %+v, %v", key, err)
 	}
 	if *firstCalls != 1 || *secondCalls != 0 {
@@ -53,7 +54,7 @@ func TestChainFallsThroughUnknownKeys(t *testing.T) {
 			first, firstCalls := answer(Key{}, unknown)
 			second, secondCalls := answer(chainKey, nil)
 			key, err := Chain(first, second).SigningKey(context.Background(), Scope{})
-			if err != nil || key.Principal != chainKey.Principal {
+			if err != nil || !reflect.DeepEqual(key.Principal, chainKey.Principal) {
 				t.Fatalf("SigningKey = %+v, %v", key, err)
 			}
 			if *firstCalls != 1 || *secondCalls != 1 {

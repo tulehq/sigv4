@@ -7,6 +7,7 @@ package sigv4
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestSessionTokenVerifies(t *testing.T) {
 				}
 				p, ok := PrincipalFrom(got.Context())
 				want := Principal{AccountID: tempAccount, ARN: tempARN, AccessKeyID: tempAccessKey}
-				if !ok || p != want {
+				if !ok || !reflect.DeepEqual(p, want) {
 					t.Fatalf("principal = %+v, %v; want %+v", p, ok, want)
 				}
 			})
