@@ -372,7 +372,8 @@ func TestStaticKey(t *testing.T) {
 	}
 	want := Principal{
 		AccountID: DefaultAccountID, ARN: "arn:aws:iam::000000000000:root", AccessKeyID: "AKID",
-		Root: true,
+		PrincipalARN: "arn:aws:iam::000000000000:root", UserID: DefaultAccountID,
+		Type: PrincipalTypeAccount, Root: true,
 	}
 	if !reflect.DeepEqual(key.Principal, want) {
 		t.Fatalf("principal = %+v, want %+v", key.Principal, want)
@@ -414,6 +415,44 @@ func TestStaticKey(t *testing.T) {
 	}
 }
 
+// A static key's principal under the root user's ARN, defaulted or named, is
+// that root user. Under another ARN it does not know the principal's
+// condition key values, and leaves them empty.
+func TestStaticKeyPrincipalAttributes(t *testing.T) {
+	root := Principal{
+		AccountID: "123456789012", ARN: "arn:aws:iam::123456789012:root", AccessKeyID: "AKID",
+		PrincipalARN: "arn:aws:iam::123456789012:root", UserID: "123456789012",
+		Type: PrincipalTypeAccount, Root: true,
+	}
+	for name, tc := range map[string]struct {
+		arn  string
+		want Principal
+	}{
+		"default root": {want: root},
+		"named root":   {arn: "arn:aws:iam::123456789012:root", want: root},
+		"other ARN": {arn: "arn:aws:iam::123456789012:user/dev", want: Principal{
+			AccountID: "123456789012", ARN: "arn:aws:iam::123456789012:user/dev",
+			AccessKeyID: "AKID", Root: true,
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			key, err := mustStatic(t, StaticKeyConfig{
+				AccessKeyID: "AKID", SecretAccessKey: "secret",
+				AccountID: "123456789012", ARN: tc.arn,
+			}).SigningKey(
+				context.Background(),
+				Scope{AccessKeyID: "AKID", Date: "20261015", Region: "us-east-1", Service: "s3"},
+			)
+			if err != nil {
+				t.Fatalf("SigningKey: %v", err)
+			}
+			if !reflect.DeepEqual(key.Principal, tc.want) {
+				t.Fatalf("principal = %+v, want %+v", key.Principal, tc.want)
+			}
+		})
+	}
+}
+
 func TestVerifyPutsThePrincipalInTheContext(t *testing.T) {
 	svc := jsonServices[0]
 	r := svc.signJSON(t, svc.body)
@@ -427,7 +466,8 @@ func TestVerifyPutsThePrincipalInTheContext(t *testing.T) {
 	// The static key's principal: Root, with no policies.
 	want := Principal{
 		AccountID: DefaultAccountID, ARN: "arn:aws:iam::000000000000:root",
-		AccessKeyID: testAccessKey, Root: true,
+		PrincipalARN: "arn:aws:iam::000000000000:root", UserID: DefaultAccountID,
+		Type: PrincipalTypeAccount, AccessKeyID: testAccessKey, Root: true,
 	}
 	if p, ok := PrincipalFrom(got.Context()); !ok || !reflect.DeepEqual(p, want) {
 		t.Fatalf("principal = %+v, %v; want %+v", p, ok, want)
