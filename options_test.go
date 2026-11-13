@@ -536,7 +536,8 @@ func TestVerifyPassesRootAndPoliciesThrough(t *testing.T) {
 // Principals shaped as the IAM User Guide's examples: aws:PrincipalArn,
 // aws:userid and aws:PrincipalType as AWS gives them for each kind of
 // principal, and, for the role session, its role tags and session tags as
-// merged.
+// merged; the organization keys in the condition keys page's format, and a
+// session whose organization is not known.
 func TestVerifyPassesPrincipalAttributesThrough(t *testing.T) {
 	static := mustStatic(
 		t,
@@ -550,6 +551,8 @@ func TestVerifyPassesPrincipalAttributesThrough(t *testing.T) {
 			UserID:       "AIDACKCEVSQ6C2EXAMPLE",
 			Type:         PrincipalTypeUser,
 			Tags:         map[string]string{"team": "yellow"},
+			OrgID:        "o-a1b2c3d4e5",
+			OrgPaths:     []string{"o-a1b2c3d4e5/r-ab12/ou-ab12-11111111/ou-ab12-22222222/"},
 			AccessKeyID:  testAccessKey,
 		},
 		"role session": {
@@ -559,6 +562,7 @@ func TestVerifyPassesPrincipalAttributesThrough(t *testing.T) {
 			UserID:       "AROADBQP57FF2AEXAMPLE:ci-session",
 			Type:         PrincipalTypeAssumedRole,
 			Tags:         map[string]string{"Department": "engineering", "Project": "Pegasus"},
+			OrgUnknown:   true,
 			AccessKeyID:  testAccessKey,
 		},
 		"root": {
@@ -567,6 +571,8 @@ func TestVerifyPassesPrincipalAttributesThrough(t *testing.T) {
 			PrincipalARN: "arn:aws:iam::111122223333:root",
 			UserID:       "111122223333",
 			Type:         PrincipalTypeAccount,
+			OrgID:        "o-a1b2c3d4e5",
+			OrgPaths:     []string{"o-a1b2c3d4e5/r-ab12/"},
 			AccessKeyID:  testAccessKey,
 			Root:         true,
 		},

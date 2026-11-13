@@ -108,11 +108,34 @@ type Principal struct {
 	AccessKeyID string
 	// Type is the value of aws:PrincipalType.
 	Type PrincipalType
+	// OrgID is the value of aws:PrincipalOrgID: the ID of the organization
+	// in AWS Organizations that the principal's account belongs to,
+	// o-xxxxxxxxxx, the management account included. Empty when the account
+	// is in no organization, where AWS leaves the key out of the request
+	// context, or when OrgUnknown is set.
+	OrgID string
+	// OrgPaths are the values of aws:PrincipalOrgPaths, a multivalued key:
+	// the paths from the organization to the principal's account, each the
+	// organization ID, the root ID and the IDs of the organizational units
+	// down to the account's parent, each followed by a slash, such as
+	// o-a1b2c3d4e5/r-ab12/ou-ab12-11111111/ou-ab12-22222222/. An account
+	// has one parent, so a KeySource supplies one path; one directly under
+	// the root has o-a1b2c3d4e5/r-ab12/. Nil whenever OrgID is empty.
+	OrgPaths []string
 	// Policies are the identity policy documents in effect for the
 	// principal, as its KeySource supplies them. They are opaque JSON for a
 	// policy evaluator; sigv4 does not interpret them, and Verify passes
 	// them through unchanged.
 	Policies []json.RawMessage
+	// OrgUnknown reports that the KeySource could not tell the principal's
+	// organization, for example because the organization service did not
+	// answer; OrgID and OrgPaths are then empty. It never means the account
+	// is in no organization. A service must then supply aws:PrincipalOrgID
+	// and aws:PrincipalOrgPaths to its policy evaluator as unknown, never as
+	// absent: an absent key satisfies a negated operator, so a condition
+	// such as StringNotEquals on aws:PrincipalOrgID would grant, or let a
+	// Deny lapse, for a principal whose organization is not known.
+	OrgUnknown bool
 	// Root marks a principal with full access to its account, such as the
 	// account's root user. A root principal is never evaluated against
 	// policies. A StaticKey's principal is Root.
