@@ -20,6 +20,13 @@
 // service maps it to its own wire error, with WithErrorMap so a streamed
 // body's read fails with it too. On success, Verify returns the request to
 // serve, whose context carries the Principal that signed it.
+//
+// A Principal says what may be authorized for it, as its KeySource reports:
+// Root, for a principal with full access to its account, which is never
+// evaluated against policies, and Policies, the identity policy documents in
+// effect for it. Policies are opaque JSON for a policy evaluator; sigv4 does
+// not interpret them, and Verify passes both through unchanged. A StaticKey's
+// principal is Root, with no policies.
 package sigv4
 
 import (
@@ -88,11 +95,11 @@ func New(keys KeySource, opts ...Option) (*Verifier, error) {
 type signed struct {
 	date          time.Time
 	cred          credential
-	key           Key
 	signature     string
 	payloadHash   string
 	sessionToken  string
 	signedHeaders []string
+	key           Key
 	presigned     bool
 	// bodyCovered is set when the signature covers the body: its hash was
 	// computed from it, or declared in hex and matched. A buffered body

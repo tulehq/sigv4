@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -370,8 +372,9 @@ func TestStaticKey(t *testing.T) {
 	}
 	want := Principal{
 		AccountID: DefaultAccountID, ARN: "arn:aws:iam::000000000000:root", AccessKeyID: "AKID",
+		Root: true,
 	}
-	if key.Principal != want {
+	if !reflect.DeepEqual(key.Principal, want) {
 		t.Fatalf("principal = %+v, want %+v", key.Principal, want)
 	}
 	if !bytes.Equal(key.Signing, DeriveSigningKey("secret", "20261015", "us-east-1", "s3")) {
@@ -421,9 +424,13 @@ func TestVerifyPutsThePrincipalInTheContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	p, ok := PrincipalFrom(got.Context())
-	if !ok || p.AccessKeyID != testAccessKey || p.AccountID != DefaultAccountID {
-		t.Fatalf("principal = %+v, %v", p, ok)
+	// The static key's principal: Root, with no policies.
+	want := Principal{
+		AccountID: DefaultAccountID, ARN: "arn:aws:iam::000000000000:root",
+		AccessKeyID: testAccessKey, Root: true,
+	}
+	if p, ok := PrincipalFrom(got.Context()); !ok || !reflect.DeepEqual(p, want) {
+		t.Fatalf("principal = %+v, %v; want %+v", p, ok, want)
 	}
 	if body, _ := io.ReadAll(got.Body); string(body) != svc.body {
 		t.Fatalf("body = %q", body)
@@ -433,6 +440,56 @@ func TestVerifyPutsThePrincipalInTheContext(t *testing.T) {
 	r.Header.Del("Authorization")
 	if got, err = jsonVerifier(t).Verify(r); got != nil || err == nil {
 		t.Fatalf("Verify = %v, %v; want nil and an error", got, err)
+	}
+}
+
+// policyKeys is a KeySource that answers with the static test key's signing
+// key and its own principal, the way the identity service supplies one.
+type policyKeys struct {
+	static    *StaticKey
+	principal Principal
+}
+
+func (k policyKeys) SigningKey(ctx context.Context, scope Scope) (Key, error) {
+	key, err := k.static.SigningKey(ctx, scope)
+	key.Principal = k.principal
+	return key, err
+}
+
+func TestVerifyPassesRootAndPoliciesThrough(t *testing.T) {
+	policies := []json.RawMessage{
+		json.RawMessage(`{"Version":"2012-10-17","Statement":[` +
+			`{"Effect":"Allow","Action":"secretsmanager:GetSecretValue","Resource":"*"}]}`),
+		// Not valid JSON: sigv4 does not interpret policies.
+		json.RawMessage(`{not a policy`),
+	}
+	static := mustStatic(
+		t,
+		StaticKeyConfig{AccessKeyID: testAccessKey, SecretAccessKey: testSecretKey},
+	)
+	for name, want := range map[string]Principal{
+		"policies": {
+			AccountID: "111122223333", ARN: "arn:aws:iam::111122223333:user/dev",
+			AccessKeyID: testAccessKey, Policies: policies,
+		},
+		"root": {
+			AccountID: "111122223333", ARN: "arn:aws:iam::111122223333:root",
+			AccessKeyID: testAccessKey, Root: true, Policies: policies,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := jsonServices[0]
+			v := mustNew(t, policyKeys{static: static, principal: want},
+				append(jsonOptions(), WithClock(fixedClock(signedAt)))...)
+			got, err := v.Verify(svc.signJSON(t, svc.body))
+			if err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+			p, ok := PrincipalFrom(got.Context())
+			if !ok || !reflect.DeepEqual(p, want) {
+				t.Fatalf("principal = %+v, %v; want %+v", p, ok, want)
+			}
+		})
 	}
 }
 

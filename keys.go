@@ -2,6 +2,7 @@ package sigv4
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 )
 
@@ -43,16 +44,25 @@ type Principal struct {
 	AccountID   string
 	ARN         string
 	AccessKeyID string
+	// Policies are the identity policy documents in effect for the
+	// principal, as its KeySource supplies them. They are opaque JSON for a
+	// policy evaluator; sigv4 does not interpret them, and Verify passes
+	// them through unchanged.
+	Policies []json.RawMessage
+	// Root marks a principal with full access to its account, such as the
+	// account's root user. A root principal is never evaluated against
+	// policies. A StaticKey's principal is Root.
+	Root bool
 }
 
 // Key is what a KeySource hands the verifier for a scope.
 type Key struct {
+	// Signing is the derived signing key; see DeriveSigningKey.
+	Signing []byte
 	// Principal is who the access key belongs to. Verify puts it in the
 	// request's context. Its AccountID must be set: a key without one fails
 	// verification with KindKeyLookupFailed.
 	Principal Principal
-	// Signing is the derived signing key; see DeriveSigningKey.
-	Signing []byte
 }
 
 // KeySource hands the verifier the signing key for a credential scope.
@@ -94,6 +104,7 @@ type StaticKeyConfig struct {
 }
 
 // StaticKey is a KeySource over one long-term access key and its secret.
+// Its principal is Root, with no policies.
 type StaticKey struct {
 	secretAccessKey string
 	principal       Principal
@@ -120,6 +131,7 @@ func NewStaticKey(cfg StaticKeyConfig) (*StaticKey, error) {
 			AccountID:   cfg.AccountID,
 			ARN:         cfg.ARN,
 			AccessKeyID: cfg.AccessKeyID,
+			Root:        true,
 		},
 	}, nil
 }

@@ -40,7 +40,7 @@ if err != nil {
 next.ServeHTTP(w, verified)
 
 // In a handler:
-p, ok := sigv4.PrincipalFrom(r.Context()) // p.AccountID, p.ARN, p.AccessKeyID
+p, ok := sigv4.PrincipalFrom(r.Context()) // p.AccountID, p.ARN, p.AccessKeyID, p.Root, p.Policies
 s, ok := sigv4.ScopeFrom(r.Context())     // the verified credential scope: s.Service, s.Region, ...
 ```
 
@@ -51,6 +51,14 @@ read who signed without the service writing its own context plumbing.
 request's body, also set on `r`, is what the handler should read: the
 buffered bytes the signature covered, or, with a streamed payload, a reader
 that checks the body against its declared hash.
+
+Besides who signed, a `Principal` carries what its `KeySource` says may be
+authorized for it. `Root` marks a principal with full access to its account,
+such as the root user; a root principal is never evaluated against policies.
+`Policies` holds the identity policy documents in effect for the principal,
+as a `KeySource` such as the identity service supplies them, each a
+`json.RawMessage`. They are opaque JSON for a policy evaluator: sigv4 does not
+interpret them, and `Verify` passes `Root` and `Policies` through unchanged.
 
 An AWS JSON service, such as secret-store or accounts:
 
@@ -271,9 +279,17 @@ type Scope struct {
 	Service      string
 }
 
+type Principal struct {
+	AccountID   string
+	ARN         string
+	AccessKeyID string
+	Policies    []json.RawMessage // identity policy documents, opaque to sigv4
+	Root        bool              // full access to its account; never evaluated against policies
+}
+
 type Key struct {
-	Principal Principal // AccountID, ARN, AccessKeyID
 	Signing   []byte    // the derived signing key
+	Principal Principal // who the key belongs to
 }
 ```
 
@@ -306,7 +322,8 @@ region and for any service, which is what each Tule service accepts today.
 It returns an error when the access key ID or secret is empty.
 It refuses any request that carries a session token. Its principal's
 `AccountID` defaults to `DefaultAccountID` (`000000000000`), and its `ARN` to
-the account's root user, `arn:aws:iam::<AccountID>:root`.
+the account's root user, `arn:aws:iam::<AccountID>:root`. Its principal is
+`Root`, with no policies.
 `DeriveSigningKey(secret, date, region, service)` derives a key for an
 implementation that holds secrets.
 
