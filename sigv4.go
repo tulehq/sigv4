@@ -28,8 +28,8 @@
 // not interpret them, and Verify passes both through unchanged. A StaticKey's
 // principal is Root, with no policies. A Principal also carries the values of
 // the principal's condition keys, aws:PrincipalArn, aws:userid,
-// aws:PrincipalType and aws:PrincipalTag, which Verify passes through
-// unchanged too.
+// aws:PrincipalType, aws:PrincipalTag, aws:PrincipalOrgID and
+// aws:PrincipalOrgPaths, which Verify passes through unchanged too.
 package sigv4
 
 import (

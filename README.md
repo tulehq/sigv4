@@ -71,6 +71,8 @@ is empty.
 | `UserID` | `aws:userid` | the IAM user's unique ID, `AIDA...` | `<role ID>:<session name>`, the role ID being `AROA...` | the account ID |
 | `Type` | `aws:PrincipalType` | `User` | `AssumedRole` | `Account` |
 | `Tags` | `aws:PrincipalTag/<key>` | the IAM user's tags | the role's tags and the session tags, a session tag replacing the role tag with the same key | none |
+| `OrgID` | `aws:PrincipalOrgID` | the organization ID, `o-...`, of the account's organization | the same | the same |
+| `OrgPaths` | `aws:PrincipalOrgPaths` | the account's path, `o-.../r-.../ou-.../` | the same | the same |
 
 `ARN` stays the ARN of the identity that signed. For a role session that is
 the assumed-role ARN, `arn:aws:sts::<account>:assumed-role/<role
@@ -86,6 +88,24 @@ account principal (the account ID, or `arn:aws:iam::<account>:root`) names
 assumed-role ARN names `ARN`. A unique ID names `UserID` for a user, and
 the role ID that `UserID` starts with for a session.
 
+**Organization keys.** `OrgID` and `OrgPaths` are set when the principal's
+account is in an organization, the management account included ("This
+global condition also applies to the management account of an AWS
+organization"), and empty otherwise, as AWS includes `aws:PrincipalOrgID`
+and `aws:PrincipalOrgPaths` "only if the principal is a member of an
+organization". A path is the organization ID, the root ID and the IDs of
+the organizational units down to the account's parent, each followed by a
+slash, such as `o-a1b2c3d4e5/r-ab12/ou-ab12-11111111/ou-ab12-22222222/`;
+an account directly under the root has `o-a1b2c3d4e5/r-ab12/`.
+`aws:PrincipalOrgPaths` is multivalued, but an account has one parent, so a
+`KeySource` supplies one path. `OrgUnknown` reports that the `KeySource`
+could not tell the organization, for example because the organization
+service did not answer; both fields are then empty. A service must then
+supply the two keys to its policy evaluator as unknown, never as absent: an
+absent key satisfies a negated operator, so `StringNotEquals` on
+`aws:PrincipalOrgID` would grant, or let a Deny lapse, for a principal
+whose organization is not known.
+
 **A session whose role no longer exists.** For a `Type` of `AssumedRole`,
 an empty `PrincipalARN` means the session's role no longer exists, never
 that the `KeySource` did not supply it. A session is bound to its role's
@@ -98,7 +118,8 @@ session match a role ARN in a resource-based policy's `Principal` element.
 
 The values are AWS's, from the IAM User Guide:
 [global condition context keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html)
-(`aws:PrincipalArn`, `aws:PrincipalTag`),
+(`aws:PrincipalArn`, `aws:PrincipalTag`, `aws:PrincipalOrgID`,
+`aws:PrincipalOrgPaths`),
 [principal key values](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable)
 (`aws:userid`, `aws:PrincipalType`),
 [IAM identifiers](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html)
@@ -335,7 +356,10 @@ type Principal struct {
 	UserID       string            // aws:userid
 	AccessKeyID  string
 	Type         PrincipalType     // aws:PrincipalType: Account, User or AssumedRole
+	OrgID        string            // aws:PrincipalOrgID; empty outside an organization
+	OrgPaths     []string          // aws:PrincipalOrgPaths: o-.../r-.../ou-.../
 	Policies     []json.RawMessage // identity policy documents, opaque to sigv4
+	OrgUnknown   bool              // the organization could not be told; never "none"
 	Root         bool              // full access to its account; never evaluated against policies
 }
 
